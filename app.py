@@ -10,17 +10,22 @@ import pandas as pd
 import streamlit as st
 
 from captions import character_error_rate, load_project, project_json, subtitles, validate
-from engine import decode_media, generate, load_model
+from engine import TRANSLATION_MODEL, decode_media, generate, load_model, load_translator
 
 st.set_page_config(page_title='Bilingual Caption Studio', page_icon='🎧', layout='wide')
 st.title('Bilingual Caption Studio')
-st.write('Mandarin audio → editable Mandarin and English subtitles.')
+st.write('Mandarin ↔ English recordings. Generate, edit, and export subtitles in both languages.')
 st.caption('Local CPU inference · No API key · SRT + WebVTT export')
 
 
 @st.cache_resource
 def cached_model(size):
     return load_model(size)
+
+
+@st.cache_resource
+def cached_translator():
+    return load_translator()
 
 
 def install_project(tracks, metadata):
@@ -31,9 +36,14 @@ def install_project(tracks, metadata):
 
 with st.sidebar:
     st.header('Project')
+    direction = st.selectbox('Recording language', ['Mandarin → English', 'English → Mandarin'])
+    source_language = 'en' if direction == 'English → Mandarin' else 'zh'
+    source_name = 'English' if source_language == 'en' else 'Mandarin'
     size = st.selectbox('Model', ['tiny', 'base', 'small'], index=2,
                         help='Small translated our synthetic smoke-test clip best. Tiny is fastest but made meaning errors. Check quality on your recordings.')
     st.caption('The first run downloads the selected model. Later inference runs locally. CPU speed depends on your computer.')
+    if source_language == 'en':
+        st.caption('English recordings also use a local English-to-Chinese translation model, downloaded on first use.')
     if st.button('Open sample captions', width='stretch'):
         data = json.loads((Path(__file__).parent / 'sample_project.json').read_text(encoding='utf-8'))
         install_project(data['tracks'], data['metadata'])
@@ -49,7 +59,8 @@ with st.sidebar:
     st.divider()
     st.caption('Sample captions are hand-written interface examples, not model output. Restoring or generating replaces the current editor. Download your project to keep edits.')
 
-uploaded = st.file_uploader('Upload a Mandarin recording (up to 50 MB / 5 minutes)',
+uploaded = st.file_uploader(f'Upload an {source_name} recording (up to 50 MB / 5 minutes)' if source_language == 'en' else 'Upload a Mandarin recording (up to 50 MB / 5 minutes)',
+                            key='recording_upload',
                             type=['wav', 'mp3', 'm4a', 'flac', 'ogg', 'mp4', 'webm'])
 source_hash = None
 if uploaded is not None:
@@ -71,8 +82,14 @@ if st.button('Generate captions', type='primary', disabled=source_hash is None):
                 path.write_bytes(uploaded.getvalue())
                 audio, duration = decode_media(str(path))
                 model = cached_model(size)
-                tracks, elapsed = generate(model, audio, progress=st.write)
+                if source_language == 'en':
+                    st.write('Loading English-to-Mandarin translation model...')
+                translator = cached_translator() if source_language == 'en' else None
+                tracks, elapsed = generate(model, audio, progress=st.write,
+                                           source_language=source_language, translator=translator)
             install_project(tracks, {'source': uploaded.name, 'source_sha256': source_hash,
+                                     'source_language': source_language,
+                                     'translation_model': TRANSLATION_MODEL if source_language == 'en' else 'Whisper speech translation',
                                      'model': size, 'device': 'cpu', 'compute_type': 'int8',
                                      'duration_seconds': round(duration, 3),
                                      'inference_seconds': elapsed, 'sample': False})
@@ -91,7 +108,14 @@ if metadata.get('sample'):
     st.warning('Sample project: hand-written captions with illustrative timings. This is not an inference result.')
 elif source_hash and metadata.get('source_sha256') != source_hash:
     st.warning('The editor belongs to a different recording. Generate captions to replace it with the selected upload.')
-st.caption('Mandarin and English are generated independently and may have different segment boundaries. Times are seconds. Export each language as its own subtitle track.')
+elif not metadata.get('sample') and metadata.get('source_language', 'zh') != source_language:
+    st.info('The current captions use the previous recording language. Generate again to apply the new selection.')
+project_source = metadata.get('source_language', 'zh')
+project_source_name = 'English' if project_source == 'en' else 'Mandarin'
+if project_source == 'en':
+    st.caption('Mandarin translations inherit the English caption timings. Editing one track does not automatically update the other. Times are seconds.')
+else:
+    st.caption('Mandarin and English are generated independently and may have different segment boundaries. Times are seconds. Export each language as its own subtitle track.')
 
 cols = st.columns(3)
 cols[0].metric('Mandarin captions', len(st.session_state.tracks['Mandarin']))
@@ -123,14 +147,14 @@ if len(valid_tracks) == 2:
     st.download_button('Save editable project (.json)', project_json(valid_tracks, metadata).encode('utf-8'),
                        file_name='caption-project.json', mime='application/json')
 
-with st.expander('Evaluate Mandarin transcription'):
-    st.write('Paste a manually verified transcript of the same recording. CER measures transcription, not English translation quality. Normalization uses NFKC, lowercasing, and removal of whitespace/punctuation; simplified and traditional characters remain distinct.')
-    reference = st.text_area('Reference Mandarin transcript')
+with st.expander(f'Evaluate {project_source_name} transcription'):
+    st.write('Paste a manually verified transcript of the same recording. CER measures source transcription, not translation quality. Normalization uses NFKC, lowercasing, and removal of whitespace/punctuation; simplified and traditional characters remain distinct.')
+    reference = st.text_area(f'Reference {project_source_name} transcript', key=f'reference_{project_source}')
     if st.button('Calculate character error rate'):
         try:
-            if 'Mandarin' not in valid_tracks:
-                raise ValueError('Fix invalid Mandarin caption rows before evaluating.')
-            hypothesis = ''.join(row['text'] for row in valid_tracks['Mandarin'])
+            if project_source_name not in valid_tracks:
+                raise ValueError(f'Fix invalid {project_source_name} caption rows before evaluating.')
+            hypothesis = ''.join(row['text'] for row in valid_tracks[project_source_name])
             score = character_error_rate(reference, hypothesis)
             st.metric('Character error rate (lower is better)', f'{score:.1%}')
             st.caption('This scores the current edited text. Evaluate before corrections to measure the model. CER can exceed 100% when there are many insertions.')

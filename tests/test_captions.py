@@ -1,6 +1,7 @@
 import json
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from captions import character_error_rate, load_project, project_json, subtitles, timestamp, validate
 from engine import generate
@@ -76,6 +77,51 @@ class CaptionTests(unittest.TestCase):
         self.assertTrue(all(task['language'] == 'zh' for task in model.tasks))
         self.assertEqual(tracks['English'][0]['text'], 'Hello')
         self.assertGreaterEqual(elapsed, 0)
+
+    def test_english_audio_translates_text_and_preserves_timestamps(self):
+        class FakeModel:
+            def transcribe(self, audio, **kwargs):
+                self.kwargs = kwargs
+                return iter([SimpleNamespace(start=0.5, end=2, text='Hello everyone.'),
+                             SimpleNamespace(start=2, end=4, text='Welcome to my demo.')]), None
+
+        model = FakeModel()
+        received = []
+        def translator(texts):
+            received.extend(texts)
+            return ['大家好。', '欢迎观看我的演示。']
+
+        tracks, _ = generate(model, object(), source_language='en', translator=translator)
+        self.assertEqual(model.kwargs['language'], 'en')
+        self.assertEqual(model.kwargs['task'], 'transcribe')
+        self.assertEqual(received, ['Hello everyone.', 'Welcome to my demo.'])
+        self.assertEqual(tracks['Mandarin'][0], {'start': 0.5, 'end': 2.0, 'text': '大家好。'})
+        for source, target in zip(tracks['English'], tracks['Mandarin']):
+            self.assertEqual((source['start'], source['end']), (target['start'], target['end']))
+        restored, metadata = load_project(project_json(tracks, {'source_language': 'en'}))
+        self.assertEqual(restored, tracks)
+        self.assertEqual(metadata['source_language'], 'en')
+
+    def test_english_silence_skips_translation_model(self):
+        class SilentModel:
+            def transcribe(self, audio, **kwargs):
+                return iter([]), None
+        with patch('engine.load_translator') as loader:
+            tracks, _ = generate(SilentModel(), object(), source_language='en')
+        loader.assert_not_called()
+        self.assertEqual(tracks, {'English': [], 'Mandarin': []})
+
+    def test_translation_failure_is_not_returned_as_partial_success(self):
+        class FakeModel:
+            def transcribe(self, audio, **kwargs):
+                return iter([SimpleNamespace(start=0, end=1, text='Hello')]), None
+        for translator in [lambda texts: [], lambda texts: ['']]:
+            with self.assertRaises(ValueError):
+                generate(FakeModel(), object(), source_language='en', translator=translator)
+
+    def test_unsupported_source_language(self):
+        with self.assertRaises(ValueError):
+            generate(object(), object(), source_language='fr')
 
 
 if __name__ == '__main__':
