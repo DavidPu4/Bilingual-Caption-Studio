@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "tracks": {
+    "Mandarin": [
+      {"start": 0.0, "end": 3.0, "text": "大家好，欢迎来到我的项目演示。"},
+      {"start": 3.2, "end": 6.0, "text": "这个工具可以生成中文和英文字幕。"},
+      {"start": 6.2, "end": 9.0, "text": "你可以修改字幕，然后导出文件。"}
+    ],
+    "English": [
+      {"start": 0.0, "end": 3.0, "text": "Hello everyone, welcome to my project demo."},
+      {"start": 3.2, "end": 6.0, "text": "This tool can generate Chinese and English subtitles."},
+      {"start": 6.2, "end": 9.0, "text": "You can edit the captions and then export the files."}
+    ]
+  },
+  "metadata": {"sample": true, "source": "Hand-written interface sample; no associated audio or inference result"}
+}
