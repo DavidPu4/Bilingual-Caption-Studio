@@ -3,10 +3,55 @@ import importlib.util
 import hashlib
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
 class AppTests(unittest.TestCase):
+    def test_cloud_video_save_refresh_and_open(self):
+        from streamlit.testing.v1 import AppTest
+        from firebase_client import load_config
+        config = {**load_config(), 'storageEnabled': True}
+        user = {'uid': 'user-a', 'email': 'test@example.com', 'id_token': 'test-token',
+                'refresh_token': 'test-refresh', 'expires_at': 9999999999}
+        name = 'users/user-a/videos/' + 'a' * 64 + '-clip.mp4'
+        info = {'name': name, 'size': '10', 'contentType': 'video/mp4'}
+        with patch('firebase_client.load_config', return_value=config):
+            app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / 'app.py')).run(timeout=30)
+            app.session_state['cloud_user'] = user
+            next(widget for widget in app.file_uploader if widget.key == 'recording_upload').set_value(
+                ('clip.mp4', b'mock-video', 'video/mp4'))
+            app.run()
+            with patch('cloud_ui.FirebaseClient.upload_video', return_value=info) as upload:
+                next(button for button in app.button if button.label == 'Save video to my cloud library').click().run()
+            self.assertEqual(len(app.exception), 0)
+            upload.assert_called_once_with(user, 'clip.mp4', b'mock-video')
+            with patch('cloud_ui.FirebaseClient.list_videos', return_value=([info], False)):
+                next(button for button in app.button if button.label == 'Refresh my videos').click().run()
+            with patch('cloud_ui.FirebaseClient.download_video', return_value=b'mock-cloud-video') as download:
+                next(button for button in app.button if button.label == 'Open selected video').click().run()
+            self.assertEqual(len(app.exception), 0)
+            download.assert_called_once_with(user, name)
+            self.assertEqual(app.session_state['cloud_recording']['content'], b'mock-cloud-video')
+            self.assertEqual(len(app.get('video')), 1)
+
+    def test_account_login_and_logout(self):
+        from streamlit.testing.v1 import AppTest
+        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / 'app.py')).run(timeout=30)
+        next(widget for widget in app.text_input if widget.label == 'Email').input('test@example.com')
+        next(widget for widget in app.text_input if widget.label == 'Password').input('password123')
+        with patch('cloud_ui.FirebaseClient.authenticate', return_value={
+                'uid': 'user-a', 'email': 'test@example.com', 'id_token': 'test-token',
+                'refresh_token': 'test-refresh', 'expires_at': 9999999999}) as authenticate:
+            next(button for button in app.button if button.label == 'Log in').click().run()
+        self.assertEqual(len(app.exception), 0)
+        authenticate.assert_called_once_with('test@example.com', 'password123', signup=False)
+        self.assertEqual(app.session_state['cloud_user']['uid'], 'user-a')
+        self.assertTrue(any(button.label == 'Refresh my videos' for button in app.button))
+        next(button for button in app.button if button.label == 'Log out').click().run()
+        self.assertEqual(len(app.exception), 0)
+        self.assertNotIn('cloud_user', app.session_state)
+
     def test_sample_edit_and_export(self):
         from streamlit.testing.v1 import AppTest
         app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / 'app.py')).run(timeout=30)

@@ -12,11 +12,12 @@ import streamlit as st
 from captions import character_error_rate, load_project, project_json, subtitles, validate
 from engine import TRANSLATION_MODEL, decode_media, generate, load_model, load_translator
 from playback import video_subtitles
+from cloud_ui import CloudRecording, render_account, render_cloud_save
 
 st.set_page_config(page_title='Bilingual Caption Studio', page_icon='🎧', layout='wide')
 st.title('Bilingual Caption Studio')
 st.write('Mandarin ↔ English recordings. Generate, edit, and export subtitles in both languages.')
-st.caption('Local CPU inference · No API key · SRT + WebVTT export')
+st.caption('Local AI inference · Optional cloud video library · SRT + WebVTT export')
 
 
 @st.cache_resource
@@ -33,6 +34,9 @@ def install_project(tracks, metadata):
     st.session_state.tracks = tracks
     st.session_state.metadata = metadata
     st.session_state.revision = st.session_state.get('revision', 0) + 1
+
+
+cloud_client, cloud_user = render_account()
 
 
 with st.sidebar:
@@ -63,6 +67,14 @@ with st.sidebar:
 uploaded = st.file_uploader(f'Upload an {source_name} recording (up to 50 MB / 5 minutes)' if source_language == 'en' else 'Upload a Mandarin recording (up to 50 MB / 5 minutes)',
                             key='recording_upload',
                             type=['wav', 'mp3', 'm4a', 'flac', 'ogg', 'mp4', 'webm'])
+cloud_recording = st.session_state.get('cloud_recording')
+if cloud_recording and cloud_user and cloud_recording['uid'] == cloud_user['uid']:
+    uploaded = CloudRecording(cloud_recording['name'], cloud_recording['content'])
+    st.caption(f'Using cloud video: {uploaded.name}')
+    if st.button('Use local upload instead', key='cloud_use_local'):
+        del st.session_state.cloud_recording
+        st.rerun()
+render_cloud_save(cloud_client, cloud_user, uploaded)
 source_hash = None
 video_preview = None
 preview_language = 'Mandarin'

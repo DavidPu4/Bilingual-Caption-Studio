@@ -19,7 +19,44 @@ After setup, Windows users can double-click **Start Studio.cmd** to launch the a
 
 On macOS/Linux use `python3` for environment creation and `.venv/bin/python` in place of `.venv\Scripts\python.exe`. The separate PyTorch command selects CPU wheels for Windows/Linux; on macOS skip that command and let `requirements.txt` install PyTorch from PyPI.
 
-The first inference downloads pretrained models from Hugging Face. No paid API or API key is needed. Speech recognition uses CPU/int8 and defaults to `small`, which translated the Mandarin synthetic smoke-test clip best. Tiny is faster but made meaning errors on that clip. English-to-Mandarin additionally downloads `Helsinki-NLP/opus-mt-en-zh`, a local CPU text translation model. Model loading and runtime depend on your internet connection and computer. The app does not train models from scratch. Audio stays in the local process and a temporary local file that is deleted after processing. Models are cached locally; temporary-file deletion is not secure disk erasure. The local server binds to 127.0.0.1.
+The first inference downloads pretrained models from Hugging Face. No paid AI API or AI API key is needed. Speech recognition uses CPU/int8 and defaults to `small`, which translated the Mandarin synthetic smoke-test clip best. Tiny is faster but made meaning errors on that clip. English-to-Mandarin additionally downloads `Helsinki-NLP/opus-mt-en-zh`, a local CPU text translation model. Model loading and runtime depend on your internet connection and computer. The app does not train models from scratch. Caption inference stays local; media is decoded in the local process and a temporary file that is deleted after processing. Videos are uploaded to Firebase only when a signed-in user clicks **Save video to my cloud library**. Models are cached locally; temporary-file deletion is not secure disk erasure. The local server binds to 127.0.0.1.
+
+## Firebase accounts and private video storage
+
+The sidebar's **Account & cloud videos** panel supports email/password account creation, login, and logout using the supplied `bilingual-caption-studio` Firebase project. Local captioning remains available without an account. When Storage setup is complete, signed-in users can explicitly save MP4/WebM files (up to 50 MB), refresh their own library, and open saved videos for caption generation and playback. Captions/projects are still saved separately as JSON; cloud caption-history sync is not included.
+
+**Current setup status:** application code and offline tests are implemented. The Firebase console required Google sign-in in this environment, so Email/Password activation, bucket/billing status, and deployed Storage Rules could not be checked or changed. `storageEnabled` is deliberately `false` until the project owner finishes the steps below. This prevents cloud writes before private rules are deployed. Live sign-up and upload have not yet been verified.
+
+### One-time Firebase console setup
+
+1. Open [Authentication for this project](https://console.firebase.google.com/project/bilingual-caption-studio/authentication/providers), initialize Authentication if necessary, and enable **Email/Password** as a sign-in provider. The app currently uses email/password, not Google sign-in.
+2. Open [Storage for this project](https://console.firebase.google.com/project/bilingual-caption-studio/storage). Firebase Storage requires the **Blaze** billing plan; the owner must approve/link billing and initialize the bucket if it does not exist. Confirm its name is `bilingual-caption-studio.firebasestorage.app`. No billing changes were made by this project setup.
+3. In **Storage → Rules**, replace the default rules with the full contents of `storage.rules` and publish them. These rules permit authenticated users to read/list only their own `users/{uid}/videos/` prefix and create/update nonempty MP4/WebM objects up to 50 MB. Other users, anonymous access, other paths, and deletes are denied. Avoid test-mode public rules.
+4. Change `"storageEnabled": false` to `"storageEnabled": true` in `firebase_web_config.json` **after** the private rules are published. Rerun the app. Never enable this flag against a bucket still using public/test-mode rules.
+
+If using the Firebase CLI instead of pasting rules into the console, run from this repository after initializing Storage:
+
+```powershell
+npx --package firebase-tools firebase login
+npx --package firebase-tools firebase deploy --only storage --project bilingual-caption-studio
+```
+
+The included `.firebaserc` and `firebase.json` select the project and `storage.rules`. The web config identifies this Firebase project and is public client configuration, not an admin/service-account credential. There is no need to provide a service-account private key. [Firebase API key guidance](https://firebase.google.com/docs/projects/api-keys), [Storage billing requirements](https://firebase.google.com/docs/storage/faqs-storage-changes-announced-sept-2024).
+
+### Use and validate the cloud library
+
+1. Create an account in the sidebar, or log in to an existing account. The app requires at least eight characters for new passwords; Firebase's configured policy may be stricter.
+2. Upload a short MP4 or WebM and click **Save video to my cloud library**. Merely selecting a file or generating captions does not upload it to Firebase.
+3. Click **Refresh my videos**, select the saved file, and click **Open selected video**. Generate captions normally. **Use local upload instead** switches back to the local file input.
+4. Log out and log in as a second test user. Confirm the first user's saved videos are absent. Also verify anonymous and cross-user reads/listing are rejected by the deployed Storage Rules before treating the cloud library as live. Offline client tests do not prove deployed rule enforcement.
+
+The initial library shows at most 100 files. Re-saving the same bytes and sanitized filename reuses the same object path. There is no video-delete UI yet. Saving videos does not make inference cloud-hosted; AI models still run on the Python app's machine.
+
+### Authentication and media handling
+
+`firebase_client.py` calls Firebase Auth REST endpoints and the Storage endpoint using the signed-in user's ID token. Expiring ID tokens are refreshed; all Storage operations run under end-user rules, with no admin SDK bypass. Firebase manages password storage. The Streamlit server receives submitted form values transiently and forwards credentials to Firebase over HTTPS; passwords are not written to disk or global caches. Tokens and loaded cloud videos stay in that browser session's Streamlit state. Logout clears cloud tokens, library entries, loaded cloud media, and captions derived from loaded cloud media. Local-only work is retained. Sessions are not persisted across server restarts.
+
+Cloud video downloads use authenticated requests and do not expose Firebase permanent download-token URLs. The local Streamlit player still uses its normal media-serving mechanism; this prototype binds to localhost. A public deployment needs HTTPS and a review of authenticated media serving/session isolation rather than assuming every Streamlit media URL is protected by Firebase login. App Check enforcement, email verification/recovery flows, quotas, and production abuse controls are not implemented here.
 
 ## Two-minute interface demo
 
@@ -59,7 +96,7 @@ Editing one language does not regenerate the other. Saved projects include the s
 
 `playback.py` prepares native video subtitle tracks from the latest validated edits and verifies the recording identity before attaching them. The video placeholder is updated after editor validation, so the preview uses the corrected caption text and timings.
 
-For fast delivery this uses Streamlit and synchronous inference. Authentication, queues, automatic retries, collaborative editing, and cloud deployment are out of scope. The UI has no progress percentage because the model API does not provide reliable overall progress. A cached model is shared within the process; deploy a worker queue before supporting concurrent inference requests.
+For fast delivery this uses Streamlit and synchronous inference. Queues, automatic retries, collaborative editing, and cloud hosting of the app are out of scope. The UI has no progress percentage because the model API does not provide reliable overall progress. A cached model is shared within the process; deploy a worker queue before supporting concurrent inference requests.
 
 ## Evaluation without invented metrics
 
@@ -103,6 +140,8 @@ This writes both subtitle formats, a restorable project, and metrics JSON. The o
 Core tests cover subtitle formatting, timestamp rollover, malformed projects, overlaps, Unicode, CER, both inference directions, translated timing preservation, silence, and failed translations. Streamlit AppTests check sample loading, direction selection, editor rendering, downloads, and source-language CER interaction. CI runs core tests without installing inference dependencies; UI tests are skipped in that minimal environment.
 
 Video-preview checks cover Mandarin/English/off selection, Unicode WebVTT timings, current edits, invalid captions, and mismatched recording identities. Browser playback was also checked with an actual uploaded MP4: Mandarin subtitles appeared over the video, including in fullscreen.
+
+Firebase tests use a fake HTTP transport and mocked account responses: sign-up/login, errors, token refresh and identity consistency, per-user paths, authenticated downloads, upload limits, metadata privacy, storage activation gating, and logout cleanup. They make no real accounts, send no verification emails, upload no files, and do not exercise the Firebase Rules engine. UI tests verify the login/logout flow without live credentials. Live Firebase verification remains pending the console setup above.
 
 ## Resume wording after you test and understand it
 
