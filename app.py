@@ -11,6 +11,7 @@ import streamlit as st
 
 from captions import character_error_rate, load_project, project_json, subtitles, validate
 from engine import TRANSLATION_MODEL, decode_media, generate, load_model, load_translator
+from playback import video_subtitles
 
 st.set_page_config(page_title='Bilingual Caption Studio', page_icon='🎧', layout='wide')
 st.title('Bilingual Caption Studio')
@@ -63,13 +64,18 @@ uploaded = st.file_uploader(f'Upload an {source_name} recording (up to 50 MB / 5
                             key='recording_upload',
                             type=['wav', 'mp3', 'm4a', 'flac', 'ogg', 'mp4', 'webm'])
 source_hash = None
+video_preview = None
+preview_language = 'Mandarin'
 if uploaded is not None:
     if uploaded.size > 50 * 1024 * 1024:
         st.error('File exceeds 50 MB. Please upload a smaller recording.')
     else:
         source_hash = hashlib.sha256(uploaded.getvalue()).hexdigest()
         if Path(uploaded.name).suffix.lower() in {'.mp4', '.webm'}:
-            st.video(uploaded.getvalue())
+            preview_language = st.radio('Captions on video', ['Mandarin', 'English', 'Off'],
+                                         horizontal=True, key='preview_language')
+            video_preview = st.empty()
+            video_preview.video(uploaded.getvalue())
         else:
             st.audio(uploaded.getvalue())
 
@@ -142,6 +148,19 @@ for name, tab in zip(['Mandarin', 'English'], st.tabs(['Mandarin captions', 'Eng
                                   file_name=f'captions-{name.lower()}.vtt', mime='text/vtt', key=f'vtt_{name}')
         except ValueError as exc:
             st.error(str(exc))
+
+if video_preview is not None:
+    preview_tracks = video_subtitles(valid_tracks, metadata, source_hash, preview_language)
+    video_preview.video(uploaded.getvalue(), subtitles=preview_tracks)
+    if preview_tracks:
+        st.caption(f'{preview_language} captions appear over the video at their timestamps. Edit a caption or timing above to update the preview. The player’s CC menu can also hide captions.')
+    elif preview_language != 'Off':
+        if metadata.get('source_sha256') != source_hash or metadata.get('sample'):
+            st.info('Generate captions for this uploaded video to show them during playback.')
+        elif preview_language not in valid_tracks:
+            st.info(f'Fix the invalid {preview_language} captions to show them on the video.')
+        else:
+            st.info(f'No {preview_language} captions were found in this recording.')
 
 if len(valid_tracks) == 2:
     st.download_button('Save editable project (.json)', project_json(valid_tracks, metadata).encode('utf-8'),

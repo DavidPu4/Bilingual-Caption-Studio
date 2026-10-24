@@ -32,11 +32,19 @@ The first inference downloads pretrained models from Hugging Face. No paid API o
 
 1. Select **Mandarin → English** or **English → Mandarin** under **Recording language** in the sidebar, then record a short passage in that language.
 2. Upload it; use the default `small` model and press **Generate captions**.
-3. Play the recording using the media player; compare each track with the audio. The player and editor are separate, with no automatic caption overlay or row-to-playback synchronization.
+3. For video, leave **Captions on video** set to **Mandarin** to see timed Mandarin subtitles over the picture. Choose **English** or **Off** to change the preview. The native player also supports fullscreen and caption controls. Audio-only uploads retain the audio player and caption tables.
 4. Before editing, paste a manually verified reference in the recording language into the transcription evaluation panel and calculate CER.
 5. Correct errors, export captions, and save the project.
 
 Inputs: WAV, MP3, M4A, FLAC, OGG, MP4, WebM; maximum 50 MB and five minutes. Video must contain an audio track. PyAV handles decoding; a standalone FFmpeg executable is not required. Duration is checked after decoding, so avoid files with misleadingly small compressed sizes and very long durations. This is a local, single-user prototype, not a hardened public upload service.
+
+## Captions over video
+
+MP4 and WebM uploads use the native Streamlit video player with generated WebVTT tracks. Mandarin is on by default; the **Captions on video** control switches to English or hides captions. Captions appear and disappear at their start/end timestamps. Correcting text or timing in the editor updates the preview on rerun; playback may restart when the player updates. There is no automatic row-to-playback seeking.
+
+The preview uses validated current edits and only attaches them when the uploaded video's SHA-256 matches the saved project's source identity. This prevents sample captions or another recording's captions appearing on the wrong video. Older saved projects without a source hash need captions generated again for video preview. SRT/WebVTT export continues to work for them.
+
+These are selectable playback captions, including in fullscreen. The original video file is unchanged; video downloads from the browser do not permanently embed this text. Burned-in MP4 export is not included.
 
 ## Architecture and decisions
 
@@ -48,6 +56,8 @@ Inputs: WAV, MP3, M4A, FLAC, OGG, MP4, WebM; maximum 50 MB and five minutes. Vid
 Editing one language does not regenerate the other. Saved projects include the source language and translation model; older projects without source-language metadata continue to default to Mandarin. Switching the recording language preserves existing captions until you generate again. Evaluation follows the saved project's source language so translated Mandarin is not mislabeled as a transcription of English audio.
 
 `captions.py` validates monotonic non-overlapping captions, formats subtitles, serializes projects, and computes character error rate using Levenshtein distance. It rejects empty text, nonfinite times, invalid ranges, and overlapping cues. UI edits stay in the editor during the session; save JSON to persist them. Generating, restoring, or loading a sample replaces the editor.
+
+`playback.py` prepares native video subtitle tracks from the latest validated edits and verifies the recording identity before attaching them. The video placeholder is updated after editor validation, so the preview uses the corrected caption text and timings.
 
 For fast delivery this uses Streamlit and synchronous inference. Authentication, queues, automatic retries, collaborative editing, and cloud deployment are out of scope. The UI has no progress percentage because the model API does not provide reliable overall progress. A cached model is shared within the process; deploy a worker queue before supporting concurrent inference requests.
 
@@ -92,6 +102,8 @@ This writes both subtitle formats, a restorable project, and metrics JSON. The o
 
 Core tests cover subtitle formatting, timestamp rollover, malformed projects, overlaps, Unicode, CER, both inference directions, translated timing preservation, silence, and failed translations. Streamlit AppTests check sample loading, direction selection, editor rendering, downloads, and source-language CER interaction. CI runs core tests without installing inference dependencies; UI tests are skipped in that minimal environment.
 
+Video-preview checks cover Mandarin/English/off selection, Unicode WebVTT timings, current edits, invalid captions, and mismatched recording identities. Browser playback was also checked with an actual uploaded MP4: Mandarin subtitles appeared over the video, including in fullscreen.
+
 ## Resume wording after you test and understand it
 
 > Built a local bidirectional Mandarin-English captioning application using Python, Streamlit, Whisper, and MarianMT, with timestamp editing, SRT/WebVTT export, and saveable projects.
@@ -104,3 +116,4 @@ After real evaluation, add the actual number of clips, model comparison, CER, an
 - [English-to-Chinese MarianMT model](https://huggingface.co/Helsinki-NLP/opus-mt-en-zh)
 - [Streamlit data editor](https://docs.streamlit.io/develop/api-reference/data/st.data_editor)
 - [Streamlit file uploader](https://docs.streamlit.io/develop/api-reference/widgets/st.file_uploader)
+- [Streamlit video subtitles](https://docs.streamlit.io/develop/api-reference/media/st.video)
