@@ -3,10 +3,42 @@ import importlib.util
 import hashlib
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
 class AppTests(unittest.TestCase):
+    def test_dubbing_opt_in_uses_edited_target_and_invalidates_old_output(self):
+        from streamlit.testing.v1 import AppTest
+        video_bytes = b'mock-dubbing-input'
+        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / 'app.py')).run(timeout=30)
+        next(widget for widget in app.file_uploader if widget.key == 'recording_upload').set_value(
+            ('mock.mp4', video_bytes, 'video/mp4'))
+        app.session_state['tracks'] = {
+            'Mandarin': [{'start': 0, 'end': 2, 'text': '修改后的中文。'}],
+            'English': [{'start': 0, 'end': 2, 'text': 'Edited English.'}]}
+        app.session_state['metadata'] = {'source_language': 'en', 'source_sha256': hashlib.sha256(video_bytes).hexdigest()}
+        app.session_state['revision'] = 1
+        app.run()
+        create = next(button for button in app.button if button.key == 'create_dubbed_video')
+        self.assertEqual(create.label, 'Create Mandarin dubbed video')
+        self.assertTrue(create.disabled)
+        next(widget for widget in app.checkbox if widget.key == 'dub_online_consent').check().run()
+        output = {'video': b'mock-output-mp4', 'audio': b'mock-output-wave', 'segments': 1,
+                  'sped_up_segments': 0, 'duration_seconds': 2, 'voice': 'zh-CN-XiaoxiaoNeural'}
+        with patch('dubbing_ui.create_dubbed_video', return_value=output) as dub:
+            next(button for button in app.button if button.key == 'create_dubbed_video').click().run()
+        self.assertEqual(len(app.exception), 0)
+        self.assertEqual(dub.call_args.args[2][0]['text'], '修改后的中文。')
+        self.assertTrue(dub.call_args.kwargs['consent'])
+        self.assertEqual(len(app.get('video')), 2)
+        self.assertTrue(any(button.label == 'Download dubbed MP4' for button in app.get('download_button')))
+        # Changing the saved recording source language changes the target and hides old dubbed video.
+        app.session_state['metadata'] = {**app.session_state['metadata'], 'source_language': 'zh'}
+        app.run()
+        self.assertEqual(len(app.get('video')), 1)
+        self.assertNotIn('dubbed_result', app.session_state)
+
     def test_sample_edit_and_export(self):
         from streamlit.testing.v1 import AppTest
         app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / 'app.py')).run(timeout=30)

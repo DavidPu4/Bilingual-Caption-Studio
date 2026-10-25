@@ -12,11 +12,12 @@ import streamlit as st
 from captions import character_error_rate, load_project, project_json, subtitles, validate
 from engine import TRANSLATION_MODEL, decode_media, generate, load_model, load_translator
 from playback import video_subtitles
+from dubbing_ui import render_dubbing
 
 st.set_page_config(page_title='Bilingual Caption Studio', page_icon='🎧', layout='wide')
 st.title('Bilingual Caption Studio')
-st.write('Mandarin ↔ English recordings. Generate, edit, and export subtitles in both languages.')
-st.caption('Local CPU inference · No API key · SRT + WebVTT export')
+st.write('Mandarin ↔ English recordings. Create translated captions and dubbed videos.')
+st.caption('Local captioning · Optional audio dubbing · Subtitle and video export')
 
 
 @st.cache_resource
@@ -165,6 +166,8 @@ if video_preview is not None:
 if len(valid_tracks) == 2:
     st.download_button('Save editable project (.json)', project_json(valid_tracks, metadata).encode('utf-8'),
                        file_name='caption-project.json', mime='application/json')
+
+render_dubbing(uploaded, metadata, source_hash, valid_tracks)
 
 with st.expander(f'Evaluate {project_source_name} transcription'):
     st.write('Paste a manually verified transcript of the same recording. CER measures source transcription, not translation quality. Normalization uses NFKC, lowercasing, and removal of whitespace/punctuation; simplified and traditional characters remain distinct.')

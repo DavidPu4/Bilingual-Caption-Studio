@@ -1,6 +1,6 @@
 # Bilingual Caption Studio
 
-A local Mandarin ↔ English caption editor built with Python, Streamlit, faster-whisper, and MarianMT. Choose the recording language, upload a short audio/video file, generate captions in both languages, correct timestamped captions, and export SRT or WebVTT files.
+A Mandarin ↔ English caption editor and video dubbing prototype built with Python, Streamlit, faster-whisper, and MarianMT. Choose the recording language, generate and edit captions, export subtitles, or create a new video with translated synthetic speech. Captioning runs locally; optional dubbing uses an online voice service with explicit opt-in.
 
 ## Quick start
 
@@ -45,6 +45,22 @@ MP4 and WebM uploads use the native Streamlit video player with generated WebVTT
 The preview uses validated current edits and only attaches them when the uploaded video's SHA-256 matches the saved project's source identity. This prevents sample captions or another recording's captions appearing on the wrong video. Older saved projects without a source hash need captions generated again for video preview. SRT/WebVTT export continues to work for them.
 
 These are selectable playback captions, including in fullscreen. The original video file is unchanged; video downloads from the browser do not permanently embed this text. Burned-in MP4 export is not included.
+
+## Translate the video's audio (dubbing)
+
+1. Upload an MP4/WebM video, select its recording language, and generate captions.
+2. Review and correct the translated caption track: Mandarin for English recordings, English for Mandarin recordings. Dubbing uses the saved project's source language even if the sidebar selection has since changed.
+3. Open **Translate the video audio to Mandarin/English** below the caption editor. Choose a standard voice.
+4. Read the online synthesis disclosure and check the box allowing the translated caption text to be sent to Microsoft. Click **Create Mandarin/English dubbed video**.
+5. Play the result, then download the dubbed MP4 or the translated WAV audio.
+
+No account, API key, or billing setup is needed for this prototype's `edge-tts` voice service. It requires internet and may be unavailable or rate-limited; it is not a service with a production availability guarantee. Only the translated caption text is sent for speech generation after opt-in and an explicit Create action. Original video/audio are not uploaded by the dubbing code. Caption generation and editing can still be used without online voice generation. See the [edge-tts project](https://github.com/rany2/edge-tts).
+
+**Audio behavior:** the output replaces every original audio track with one translated AAC track. Original dialogue, music, and background sound are removed together. This is standard synthetic narration, not voice cloning, source separation, or lip synchronization. Mandarin voices are Xiaoxiao/Yunxi; English voices are Jenny/Guy. Translation mistakes remain audible unless you correct the target captions before dubbing.
+
+Speech starts at each caption's timestamp. Shorter speech leaves silence; longer speech can use the silent gap before the next caption and is sped up with pitch-preserving FFmpeg `atempo` if necessary. It never overlaps the next line. More than 2.5x required speed, captions past the end of the video, or residual overflow fails with an editable caption-row error instead of silently cutting off speech. Current limits are five minutes, 50 MB input, 200 captions, and 30,000 caption characters. Timing is approximate, especially around long translations and pauses.
+
+`dubbing.py` handles explicit synthesis consent, three concurrent speech requests with one retry per failed segment, a mono 24 kHz audio timeline, and local MP4 export. H.264 video is stream-copied; other codecs are transcoded to H.264/yuv420p. FFmpeg is supplied by the `imageio-ffmpeg` wheel. `dubbing_ui.py` handles voice selection, disclosure, preview, and downloads. Outputs remain in session memory; temporary work files are removed. Source-video hash, target caption text/timing, and voice fingerprint invalidate stale outputs when edited.
 
 ## Architecture and decisions
 
@@ -104,6 +120,10 @@ Core tests cover subtitle formatting, timestamp rollover, malformed projects, ov
 
 Video-preview checks cover Mandarin/English/off selection, Unicode WebVTT timings, current edits, invalid captions, and mismatched recording identities. Browser playback was also checked with an actual uploaded MP4: Mandarin subtitles appeared over the video, including in fullscreen.
 
+Dubbing tests cover opt-in gating, source/caption/voice fingerprinting, timeline placement and silence, tempo speed limits, rejection of overlong speech, and stale-result invalidation. Media integration tests verify a newly exported video has exactly one replacement AAC audio track, with no original test tone retained, and verify WebM-to-H.264 conversion. CI skips media/UI tests when their optional runtime packages are absent. The ordinary test suite does not contact the online speech service.
+
+Separate manual smoke checks on October 25, 2026 synthesized both Mandarin and English, created downloadable MP4/WAV files from a synthetic nine-second video, and transcribed the produced speech back with Whisper small. Both recovered the expected text after punctuation/whitespace normalization. This is a short synthetic check, not a dubbing-quality or timing benchmark on real videos. Ignored `local-results/` files contain the local test outputs.
+
 ## Resume wording after you test and understand it
 
 > Built a local bidirectional Mandarin-English captioning application using Python, Streamlit, Whisper, and MarianMT, with timestamp editing, SRT/WebVTT export, and saveable projects.
@@ -117,3 +137,6 @@ After real evaluation, add the actual number of clips, model comparison, CER, an
 - [Streamlit data editor](https://docs.streamlit.io/develop/api-reference/data/st.data_editor)
 - [Streamlit file uploader](https://docs.streamlit.io/develop/api-reference/widgets/st.file_uploader)
 - [Streamlit video subtitles](https://docs.streamlit.io/develop/api-reference/media/st.video)
+- [edge-tts speech synthesis](https://github.com/rany2/edge-tts)
+- [imageio-ffmpeg](https://github.com/imageio/imageio-ffmpeg)
+- [FFmpeg audio tempo filter](https://ffmpeg.org/ffmpeg-filters.html#atempo)

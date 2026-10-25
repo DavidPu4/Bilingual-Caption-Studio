@@ -1,0 +1,193 @@
+"""Opt-in speech synthesis, timed audio assembly, and local dubbed-video export."""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import math
+from pathlib import Path
+import subprocess
+import tempfile
+import wave
+
+from captions import validate
+
+SAMPLE_RATE = 24000
+MAX_SPEED = 2.5
+VOICES = {
+    'Mandarin': {'Xiaoxiao': 'zh-CN-XiaoxiaoNeural', 'Yunxi': 'zh-CN-YunxiNeural'},
+    'English': {'Jenny': 'en-US-JennyNeural', 'Guy': 'en-US-GuyNeural'},
+}
+
+
+class DubbingError(Exception):
+    pass
+
+
+def dubbing_signature(source_sha256, rows, voice):
+    payload = json.dumps([source_sha256, validate(rows), voice], ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+
+def speech_slots(rows, duration):
+    rows = validate(rows)
+    if not rows:
+        raise DubbingError('No translated captions are available to speak.')
+    if not math.isfinite(duration) or not 0 < duration <= 300:
+        raise DubbingError('Dubbing supports videos up to five minutes long.')
+    if len(rows) > 200 or sum(len(row['text']) for row in rows) > 30000:
+        raise DubbingError('Please use fewer than 201 captions and 30,000 text characters.')
+    for index, row in enumerate(rows):
+        if row['end'] > duration + 0.001:
+            raise DubbingError(f'Caption {index + 1} ends after the video. Correct its timing first.')
+    # Use a following silent gap if needed, but never overlap the next caption's start.
+    return [(row, (rows[index + 1]['start'] if index + 1 < len(rows) else duration) - row['start'])
+            for index, row in enumerate(rows)]
+
+
+def tempo_filter(speed):
+    if not math.isfinite(speed) or not 1 <= speed <= MAX_SPEED:
+        raise DubbingError(f'Speech speed must be between 1 and {MAX_SPEED}.')
+    filters = []
+    while speed > 2:
+        filters.append('atempo=2')
+        speed /= 2
+    filters.append(f'atempo={speed:.8f}')
+    return ','.join(filters)
+
+
+def run_ffmpeg(arguments, *, timeout=240):
+    import imageio_ffmpeg
+    options = {'creationflags': subprocess.CREATE_NO_WINDOW} if hasattr(subprocess, 'CREATE_NO_WINDOW') else {}
+    try:
+        process = subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(), '-hide_banner', '-loglevel', 'error', '-nostdin',
+                                  *map(str, arguments)], capture_output=True, timeout=timeout, **options)
+    except subprocess.TimeoutExpired:
+        raise DubbingError('Video processing took too long. Try a shorter clip.') from None
+    except OSError:
+        raise DubbingError('The bundled video processor could not start. Reinstall imageio-ffmpeg.') from None
+    if process.returncode:
+        detail = process.stderr.decode('utf-8', errors='replace')[-1000:]
+        raise DubbingError(f'Video processing failed: {detail}')
+    return process.stdout
+
+
+def probe_video(path):
+    import av
+    try:
+        with av.open(str(path)) as container:
+            if not container.streams.video:
+                raise DubbingError('Upload a video file to create a dubbed MP4.')
+            stream = container.streams.video[0]
+            duration = (float(stream.duration * stream.time_base) if stream.duration is not None
+                        else float(container.duration / av.time_base) if container.duration else 0)
+            codec = stream.codec_context.name
+    except DubbingError:
+        raise
+    except Exception:
+        raise DubbingError('The uploaded video could not be read.') from None
+    if not math.isfinite(duration) or not 0 < duration <= 300:
+        raise DubbingError('Upload a readable video no longer than five minutes.')
+    return duration, codec
+
+
+async def synthesize_segments(rows, voice, directory):
+    import edge_tts
+    semaphore = asyncio.Semaphore(3)
+
+    async def synthesize(index, row):
+        path = directory / f'speech-{index:04}.mp3'
+        async with semaphore:
+            for attempt in range(2):
+                try:
+                    await edge_tts.Communicate(row['text'], voice).save(str(path))
+                    if not path.exists() or not path.stat().st_size:
+                        raise DubbingError('The voice service returned no audio.')
+                    return path
+                except Exception:
+                    if attempt:
+                        raise DubbingError(f'Voice generation failed for caption {index + 1}. The online voice service may be unavailable; try again later.') from None
+                    await asyncio.sleep(0.5)
+    return await asyncio.gather(*(synthesize(index, row) for index, row in enumerate(rows)))
+
+
+def decode_speech(path):
+    from faster_whisper.audio import decode_audio
+    return decode_audio(str(path), sampling_rate=SAMPLE_RATE)
+
+
+def assemble_audio(slots, files, duration, decoder=decode_speech, processor=run_ffmpeg):
+    import numpy as np
+    if len(slots) != len(files):
+        raise DubbingError('Missing speech audio for one or more captions.')
+    timeline = np.zeros(round(duration * SAMPLE_RATE), dtype=np.float32)
+    sped_up = 0
+    for index, ((row, available), path) in enumerate(zip(slots, files), 1):
+        samples = decoder(path)
+        if not len(samples):
+            raise DubbingError(f'Caption {index} produced empty speech.')
+        start = round(row['start'] * SAMPLE_RATE)
+        # Round endpoints, rather than duration separately, to avoid a one-sample overlap.
+        end = min(round((row['start'] + available) * SAMPLE_RATE), len(timeline))
+        limit = end - start
+        if limit <= 0:
+            raise DubbingError(f'Caption {index} has no time available for speech.')
+        if len(samples) > limit:
+            speed = len(samples) / limit * 1.04  # atempo output length is approximate; allow headroom.
+            if speed > MAX_SPEED:
+                raise DubbingError(f'Caption {index} needs more than {MAX_SPEED}x speech speed. Shorten its text or give it more time before the next caption.')
+            raw = processor(['-i', path, '-vn', '-af', tempo_filter(speed), '-ar', SAMPLE_RATE,
+                             '-ac', 1, '-f', 'f32le', 'pipe:1'])
+            samples = np.frombuffer(raw, dtype='<f4')
+            if len(samples) > limit:
+                raise DubbingError(f'Caption {index} still does not fit. Shorten its text or extend the time before the next caption.')
+            sped_up += 1
+        timeline[start:start + len(samples)] = samples
+    return timeline, sped_up
+
+
+def write_wave(path, samples):
+    import numpy as np
+    with wave.open(str(path), 'wb') as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(SAMPLE_RATE)
+        output.writeframes((np.clip(samples, -1, 1) * 32767).astype('<i2').tobytes())
+
+
+def mux_video(source, audio, output, duration, codec):
+    video_options = ['-c:v', 'copy'] if codec == 'h264' else [
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p',
+        '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2']
+    run_ffmpeg(['-y', '-i', source, '-i', audio, '-map', '0:v:0', '-map', '1:a:0',
+                *video_options, '-c:a', 'aac', '-b:a', '160k', '-t', f'{duration:.6f}',
+                '-movflags', '+faststart', output])
+
+
+def create_dubbed_video(video_bytes, suffix, rows, voice, *, consent=False, progress=lambda message: None):
+    if not consent:
+        raise DubbingError('Confirm online voice generation before sending any caption text.')
+    if suffix.lower() not in {'.mp4', '.webm'} or not 0 < len(video_bytes) <= 50 * 1024 * 1024:
+        raise DubbingError('Upload an MP4 or WebM video of 50 MB or less.')
+    if voice not in {value for group in VOICES.values() for value in group.values()}:
+        raise DubbingError('Choose one of the provided Mandarin or English voices.')
+    with tempfile.TemporaryDirectory(prefix='caption-studio-dub-') as folder:
+        directory = Path(folder)
+        source = directory / ('input' + suffix.lower())
+        source.write_bytes(video_bytes)
+        duration, codec = probe_video(source)
+        slots = speech_slots(rows, duration)
+        progress(f'Generating {len(slots)} translated speech segments...')
+        files = asyncio.run(synthesize_segments([row for row, _ in slots], voice, directory))
+        progress('Fitting speech to the video timeline...')
+        timeline, sped_up = assemble_audio(slots, files, duration)
+        audio = directory / 'translated-audio.wav'
+        write_wave(audio, timeline)
+        progress('Creating the dubbed MP4...')
+        output = directory / 'dubbed.mp4'
+        mux_video(source, audio, output, duration, codec)
+        if output.stat().st_size > 200 * 1024 * 1024:
+            raise DubbingError('The dubbed output is too large. Try a shorter video.')
+        return {'video': output.read_bytes(), 'audio': audio.read_bytes(),
+                'segments': len(slots), 'sped_up_segments': sped_up, 'duration_seconds': duration,
+                'voice': voice}
