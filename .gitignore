@@ -10,8 +10,3 @@ local-results/
 .streamlit/secrets.toml
 .DS_Store
 Thumbs.db
-.firebase/
-firebase-debug.log
-firebase-debug.*.log
-*-service-account.json
-serviceAccountKey.json
