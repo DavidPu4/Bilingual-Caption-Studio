@@ -2,6 +2,49 @@
 
 A Mandarin ↔ English caption editor and video dubbing prototype built with Python, Streamlit, faster-whisper, and MarianMT. Choose the recording language, generate and edit captions, export subtitles, or create a new video with translated synthetic speech. Captioning runs locally; optional dubbing uses an online voice service with explicit opt-in.
 
+## Windows desktop app
+
+[Download the Windows desktop ZIP](https://github.com/DavidPu4/Bilingual-Caption-Studio/releases/latest). Choose the `Windows-x64.zip` asset under **Assets**.
+
+The Windows x64 desktop edition opens in its own native window, with the existing caption editor, video subtitles, and audio dubbing. It uses pywebview with Microsoft Edge WebView2 around a private local Streamlit server. No Vercel, Firebase, user account, or billing plan is required.
+
+For a portable build, extract the **entire** `Bilingual-Caption-Studio-1.0.0-Windows-x64.zip` folder and double-click **Bilingual Caption Studio.exe**. Keep `runtime/`, `_internal/`, and `app/` beside the executable. Python and app libraries are included; the recipient does not need Python installed. The build targets Windows 10/11 x64 and requires [Microsoft Edge WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) and the latest [Microsoft Visual C++ x64 Redistributable](https://aka.ms/vc14/vc_redist.x64.exe), commonly already installed. The launcher reports a missing native runtime with its official download link. This is an unsigned portable build, not an MSI installer or Microsoft Store release.
+
+Speech/translation model weights are not included in the ZIP: first use downloads the selected models into the user's normal Hugging Face cache. Subsequent caption inference is local. Optional dubbing retains its online opt-in and sends translated text to Microsoft. Save projects as JSON before closing; session edits are not automatically persisted.
+
+### Run the desktop edition from source
+
+Use the same Python 3.12 virtual environment as below, then install the desktop dependencies:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-desktop.txt
+.\.venv\Scripts\python.exe desktop.py
+```
+
+After installation, **Start Desktop.cmd** opens the desktop window without a console. **Start Studio.cmd** continues to open the browser edition.
+
+### Build the portable Windows release
+
+Build on Windows x64 from the virtual environment containing the app's tested dependencies:
+
+```powershell
+.\.venv\Scripts\python.exe tools/build_desktop.py
+```
+
+Output: `dist/Bilingual-Caption-Studio-1.0.0-Windows-x64/` and a ZIP alongside it. The builder refuses to overwrite an existing output; use `--output dist/another-name` for another build. Use `--no-zip` to build first and `--archive-existing dist/folder-name` to archive after verification. The ZIP includes a SHA-256 checksum file alongside it. Large binaries and generated build files are excluded from Git. Models, recordings, local results, Git history, and user secrets are not copied into the release. Detailed startup reports remain in ignored build files; the release includes only a sanitized `verification.json`.
+
+PyInstaller freezes only the lightweight window launcher. A relocatable copy of CPython and the complete installed package directories run the ML backend separately; this preserves Streamlit static files, distribution metadata, native libraries, and dynamic model imports. The runtime is not a copied `.venv` tied to the original computer. `installed-versions.txt` and third-party license metadata are retained in the build.
+
+The launcher selects an available loopback port, disables automatic browser launch/file watching/telemetry, and shows a startup screen while the server becomes ready. It ignores inherited Python path settings. Closing the desktop window terminates its owned Windows job, including the server and processing descendants, while leaving other local app servers alone. Logs are under `%LOCALAPPDATA%\BilingualCaptionStudio\logs`; browser data is also stored under the app's user-data directory.
+
+To run the bundled server startup/shutdown check without a GUI:
+
+```powershell
+& '.\dist\Bilingual-Caption-Studio-1.0.0-Windows-x64\Bilingual Caption Studio.exe' --self-test --report desktop-check.json
+```
+
+The report verifies that the packaged server starts, responds to its health check, and stops. The desktop UI also enables native downloads so subtitle, project, WAV, and MP4 exports work in the window. [pywebview packaging](https://pywebview.flowrl.com/guide/freezing), [download settings](https://pywebview.flowrl.com/api/).
+
 ## Quick start
 
 Install Python 3.12 and Git, then run these commands in PowerShell:
@@ -88,6 +131,8 @@ Create 5-10 short Mandarin clips with manually checked references, including qui
 CER = character edit distance / reference length. Normalization uses NFKC, lowercase, and removal of whitespace and Unicode punctuation. It does not convert simplified/traditional Chinese. CER can exceed 100%. Score unedited captions to evaluate the model, and label corrected-caption scores separately. Inference time excludes decoding and model download/load. CER is not a translation metric: manually review English for meaning, omissions, and names. No accuracy claim is established by the sample project or automated unit tests.
 
 ## Tests
+
+Desktop release validation on October 25, 2026: all 41 automated checks passed. The bundled runtime also completed real Mandarin transcription, English speech translation, and English-to-Chinese text translation on synthetic input. Native-window SRT and editable-project JSON exports were saved and checked; closing the window stopped its private server while the existing browser app remained available. These are functional checks, not general model accuracy measurements.
 
 Local validation on October 24, 2026: all 11 automated checks passed. A separate end-to-end inference check used one 8.28-second Mandarin clip synthesized with Google's text-to-speech endpoint, from this known text: 大家好，这是一个中文测试。今天我们学习如何制作英文字幕。
 

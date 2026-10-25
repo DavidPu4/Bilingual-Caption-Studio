@@ -10,3 +10,6 @@ local-results/
 .streamlit/secrets.toml
 .DS_Store
 Thumbs.db
+build/
+dist/
+*.spec
