@@ -5,6 +5,8 @@ import json
 import math
 import unicodedata
 
+from languages import default_target, language_name, validate_pair
+
 
 def validate(rows: list[dict]) -> list[dict]:
     clean = []
@@ -55,21 +57,50 @@ def subtitles(rows: list[dict], format: str = 'srt') -> str:
     return ('WEBVTT\n\n' if format == 'vtt' else '') + '\n\n'.join(blocks) + ('\n' if blocks else '')
 
 
+def project_languages(metadata: dict) -> tuple[str, str]:
+    """Read a saved language pair, including the original direction-only format."""
+    if not isinstance(metadata, dict):
+        raise ValueError('Project metadata must be an object.')
+    source = metadata.get('source_language', 'zh')
+    target = metadata.get('target_language', default_target(source))
+    validate_pair(source, target)
+    return source, target
+
+
+def _project_tracks(tracks, metadata, version):
+    if not isinstance(tracks, dict) or not isinstance(metadata, dict):
+        raise ValueError('Project tracks and metadata must be objects.')
+    if version == 1:
+        if set(tracks) != {'Mandarin', 'English'}:
+            raise ValueError('Legacy projects must contain Mandarin and English tracks.')
+        source, target = project_languages(metadata)
+        if {source, target} != {'zh', 'en'}:
+            raise ValueError('Legacy project language metadata does not match its tracks.')
+    else:
+        if 'source_language' not in metadata or 'target_language' not in metadata:
+            raise ValueError('Multilingual projects must specify source and target language codes.')
+        source, target = project_languages(metadata)
+        if set(tracks) != {language_name(source), language_name(target)}:
+            raise ValueError('Project tracks must match the saved source and target languages.')
+    if any(not isinstance(rows, list) for rows in tracks.values()):
+        raise ValueError('Each caption track must be a list of caption rows.')
+    return {name: validate(rows) for name, rows in tracks.items()}
+
+
 def project_json(tracks: dict[str, list[dict]], metadata: dict) -> str:
-    return json.dumps({'version': 1, 'tracks': {name: validate(rows) for name, rows in tracks.items()},
-                       'metadata': metadata}, ensure_ascii=False, indent=2)
+    # Keep legacy files portable to v1 readers. New explicit pairs use schema v2.
+    version = 2 if isinstance(metadata, dict) and 'target_language' in metadata else 1
+    clean = _project_tracks(tracks, metadata, version)
+    return json.dumps({'version': version, 'tracks': clean, 'metadata': metadata},
+                      ensure_ascii=False, indent=2)
 
 
 def load_project(raw: str) -> tuple[dict, dict]:
     try:
         data = json.loads(raw)
-        if data['version'] != 1 or not isinstance(data['tracks'], dict):
-            raise ValueError('Unsupported project version or tracks.')
-        if set(data['tracks']) != {'Mandarin', 'English'}:
-            raise ValueError('Project must contain Mandarin and English tracks.')
-        if not isinstance(data.get('metadata', {}), dict):
-            raise ValueError('Project metadata must be an object.')
-        tracks = {name: validate(rows) for name, rows in data['tracks'].items()}
+        if not isinstance(data, dict) or type(data.get('version')) is not int or data['version'] not in {1, 2}:
+            raise ValueError('Unsupported project version.')
+        tracks = _project_tracks(data['tracks'], data.get('metadata', {}), data['version'])
         return tracks, data.get('metadata', {})
     except (KeyError, TypeError, AttributeError, json.JSONDecodeError) as exc:
         raise ValueError('Invalid project JSON.') from exc

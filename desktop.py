@@ -18,7 +18,7 @@ import threading
 import time
 
 APP_NAME = 'Bilingual Caption Studio'
-VERSION = '1.0.0'
+VERSION = '1.1.0'
 
 
 def application_paths():

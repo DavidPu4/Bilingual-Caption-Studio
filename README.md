@@ -1,14 +1,27 @@
 # Bilingual Caption Studio
 
-A Mandarin ↔ English caption editor and video dubbing prototype built with Python, Streamlit, faster-whisper, and MarianMT. Choose the recording language, generate and edit captions, export subtitles, or create a new video with translated synthetic speech. Captioning runs locally; optional dubbing uses an online voice service with explicit opt-in.
+A caption editor and video dubbing prototype supporting 20 selectable recording and translation languages, built with Python, Streamlit, faster-whisper, MarianMT, and M2M100. Choose the recording and target languages, generate and edit captions, export subtitles, or create a video with translated synthetic speech. Captioning runs locally; optional dubbing uses an online voice service with explicit opt-in.
+
+## Languages in version 1.1
+
+English, Mandarin, Spanish, Hindi, Arabic, French, Portuguese, Russian, German, Japanese, Korean, Italian, Bengali, Indonesian, Urdu, Turkish, Vietnamese, Tamil, Thai, and Dutch. Choose **Recording language** and **Translate to** independently; the target must differ from the source. The UI exposes 380 possible directions across these 20 languages.
+
+- Translations **into English** use Whisper's speech-translation task.
+- **English to Mandarin** retains the existing MarianMT model and workflow.
+- Other selected pairs use the local [M2M100 418M model](https://huggingface.co/facebook/m2m100_418M). Its roughly 2 GB weights download on first use and require additional RAM/CPU time; weights are not included in the desktop ZIP. One model instance is shared across language pairs, with a lock around the tokenizer's mutable language setting.
+- The application provides two synthetic voice choices per selected language. The 40 configured IDs were checked against Microsoft's live voice catalog; availability can change. Voice generation remains online and opt-in.
+
+These are model-supported language choices, not a claim of equal accuracy or native-speaker evaluation in every direction. Names, technical terms, dialects, and low-resource language pairs can translate poorly. Review and edit captions before exporting or dubbing. This release does not support every language in the world.
+
+Saved multilingual projects use schema version 2 with explicit source/target language codes. Version 1 Mandarin/English projects still restore with their original direction. Changing the selectors preserves existing project languages until generation replaces the editor; preview, dubbing, and CER evaluation follow the saved project.
 
 ## Windows desktop app
 
 [Download the Windows desktop ZIP](https://github.com/DavidPu4/Bilingual-Caption-Studio/releases/latest). Choose the `Windows-x64.zip` asset under **Assets**.
 
-The Windows x64 desktop edition opens in its own native window, with the existing caption editor, video subtitles, and audio dubbing. It uses pywebview with Microsoft Edge WebView2 around a private local Streamlit server. No Vercel, Firebase, user account, or billing plan is required.
+The Windows x64 desktop edition opens in its own native window, with the caption editor, video subtitles, and audio dubbing. It uses pywebview with Microsoft Edge WebView2 around a private local Streamlit server. No Vercel, Firebase, user account, or billing plan is required.
 
-For a portable build, extract the **entire** `Bilingual-Caption-Studio-1.0.0-Windows-x64.zip` folder and double-click **Bilingual Caption Studio.exe**. Keep `runtime/`, `_internal/`, and `app/` beside the executable. Python and app libraries are included; the recipient does not need Python installed. The build targets Windows 10/11 x64 and requires [Microsoft Edge WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) and the latest [Microsoft Visual C++ x64 Redistributable](https://aka.ms/vc14/vc_redist.x64.exe), commonly already installed. The launcher reports a missing native runtime with its official download link. This is an unsigned portable build, not an MSI installer or Microsoft Store release.
+For a portable build, extract the **entire** `Bilingual-Caption-Studio-1.1.0-Windows-x64.zip` folder and double-click **Bilingual Caption Studio.exe**. Keep `runtime/`, `_internal/`, and `app/` beside the executable. Python and app libraries are included; the recipient does not need Python installed. The build targets Windows 10/11 x64 and requires [Microsoft Edge WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) and the latest [Microsoft Visual C++ x64 Redistributable](https://aka.ms/vc14/vc_redist.x64.exe), commonly already installed. The launcher reports a missing native runtime with its official download link. This is an unsigned portable build, not an MSI installer or Microsoft Store release.
 
 Speech/translation model weights are not included in the ZIP: first use downloads the selected models into the user's normal Hugging Face cache. Subsequent caption inference is local. Optional dubbing retains its online opt-in and sends translated text to Microsoft. Save projects as JSON before closing; session edits are not automatically persisted.
 
@@ -31,7 +44,7 @@ Build on Windows x64 from the virtual environment containing the app's tested de
 .\.venv\Scripts\python.exe tools/build_desktop.py
 ```
 
-Output: `dist/Bilingual-Caption-Studio-1.0.0-Windows-x64/` and a ZIP alongside it. The builder refuses to overwrite an existing output; use `--output dist/another-name` for another build. Use `--no-zip` to build first and `--archive-existing dist/folder-name` to archive after verification. The ZIP includes a SHA-256 checksum file alongside it. Large binaries and generated build files are excluded from Git. Models, recordings, local results, Git history, and user secrets are not copied into the release. Detailed startup reports remain in ignored build files; the release includes only a sanitized `verification.json`.
+Output: `dist/Bilingual-Caption-Studio-1.1.0-Windows-x64/` and a ZIP alongside it. The builder refuses to overwrite an existing output; use `--output dist/another-name` for another build. Use `--no-zip` to build first and `--archive-existing dist/folder-name` to archive after verification. The ZIP includes a SHA-256 checksum file alongside it. Large binaries and generated build files are excluded from Git. Models, recordings, local results, Git history, and user secrets are not copied into the release. Detailed startup reports remain in ignored build files; the release includes only a sanitized `verification.json`.
 
 PyInstaller freezes only the lightweight window launcher. A relocatable copy of CPython and the complete installed package directories run the ML backend separately; this preserves Streamlit static files, distribution metadata, native libraries, and dynamic model imports. The runtime is not a copied `.venv` tied to the original computer. `installed-versions.txt` and third-party license metadata are retained in the build.
 
@@ -40,7 +53,7 @@ The launcher selects an available loopback port, disables automatic browser laun
 To run the bundled server startup/shutdown check without a GUI:
 
 ```powershell
-& '.\dist\Bilingual-Caption-Studio-1.0.0-Windows-x64\Bilingual Caption Studio.exe' --self-test --report desktop-check.json
+& '.\dist\Bilingual-Caption-Studio-1.1.0-Windows-x64\Bilingual Caption Studio.exe' --self-test --report desktop-check.json
 ```
 
 The report verifies that the packaged server starts, responds to its health check, and stops. The desktop UI also enables native downloads so subtitle, project, WAV, and MP4 exports work in the window. [pywebview packaging](https://pywebview.flowrl.com/guide/freezing), [download settings](https://pywebview.flowrl.com/api/).
@@ -73,7 +86,7 @@ The first inference downloads pretrained models from Hugging Face. No paid API o
 
 ## Real recording demo
 
-1. Select **Mandarin → English** or **English → Mandarin** under **Recording language** in the sidebar, then record a short passage in that language.
+1. Select **Recording language** and **Translate to** in the sidebar, then record a short passage in the source language.
 2. Upload it; use the default `small` model and press **Generate captions**.
 3. For video, leave **Captions on video** set to **Mandarin** to see timed Mandarin subtitles over the picture. Choose **English** or **Off** to change the preview. The native player also supports fullscreen and caption controls. Audio-only uploads retain the audio player and caption tables.
 4. Before editing, paste a manually verified reference in the recording language into the transcription evaluation panel and calculate CER.
@@ -107,10 +120,12 @@ Speech starts at each caption's timestamp. Shorter speech leaves silence; longer
 
 ## Architecture and decisions
 
-`app.py` handles uploads, model caching, editing, project restoration, and downloads. `engine.py` decodes media to 16 kHz and supports two paths:
+`app.py` handles uploads, model caching, editing, project restoration, and downloads. `languages.py` is the shared 20-language registry. `engine.py` decodes media to 16 kHz and supports these paths:
 
 - **Mandarin → English:** two Whisper passes: `task=transcribe, language=zh` for Mandarin and `task=translate, language=zh` for English. The English result comes directly from speech translation. Each track retains its independently generated timing; the app does not claim sentence-level alignment for this path.
 - **English → Mandarin:** one Whisper transcription pass with `language=en`, then `Helsinki-NLP/opus-mt-en-zh` translates English caption text in batches. Mandarin captions inherit the source caption start/end times. This text model produces written Chinese; no translated voice is generated. The translator is loaded lazily and cached separately. Overlong inputs fail explicitly rather than silently truncating text.
+- **Any selected source → English:** Whisper transcription and speech translation run as separate tasks with the selected source code. Their segment boundaries can differ.
+- **Other selected pairs:** transcribe the source with Whisper, then translate each caption with M2M100 using explicit source and forced target language tokens. Translated captions inherit source timings. Pair-bound callables share cached model weights and serialize tokenizer/inference access. These text translation paths do not themselves generate voice; the separate opt-in dubbing stage does.
 
 Editing one language does not regenerate the other. Saved projects include the source language and translation model; older projects without source-language metadata continue to default to Mandarin. Switching the recording language preserves existing captions until you generate again. Evaluation follows the saved project's source language so translated Mandarin is not mislabeled as a transcription of English audio.
 
@@ -131,6 +146,10 @@ Create 5-10 short Mandarin clips with manually checked references, including qui
 CER = character edit distance / reference length. Normalization uses NFKC, lowercase, and removal of whitespace and Unicode punctuation. It does not convert simplified/traditional Chinese. CER can exceed 100%. Score unedited captions to evaluate the model, and label corrected-caption scores separately. Inference time excludes decoding and model download/load. CER is not a translation metric: manually review English for meaning, omissions, and names. No accuracy claim is established by the sample project or automated unit tests.
 
 ## Tests
+
+Multilingual version 1.1 validation on October 31, 2026: **61 automated checks passed**, including model-routing tests across the 380 selectable directions, shared-model/cache locking, legacy/v2 project restoration, Unicode subtitles, selected versus saved language state, and multilingual dubbing controls. Fake-backed routing checks establish code behavior, not translation accuracy. A separate real M2M100 text smoke check produced Spanish, French, Japanese, Arabic, and Hindi outputs; the samples included omissions/word-choice errors and are not a quality benchmark. The first-use download/load plus those five translations took 110.9 seconds on this computer, including network time; that is not a general speed claim. The optional speech catalog returned all 40 configured voice IDs. Machine-local evidence is kept under ignored `local-results/` files.
+
+A real 6.384-second synthetic English clip also completed the Whisper-to-Spanish pipeline with matching caption timestamps, nonempty source/target tracks, SRT/WebVTT exports, and a version-2 project roundtrip. A separate Spanish synthetic-voice check exported a nine-second dubbed MP4 with one video stream and one AAC audio stream, plus a nine-second WAV. These functional examples do not establish accuracy across the 20 languages.
 
 Desktop release validation on October 25, 2026: all 41 automated checks passed. The bundled runtime also completed real Mandarin transcription, English speech translation, and English-to-Chinese text translation on synthetic input. Native-window SRT and editable-project JSON exports were saved and checked; closing the window stopped its private server while the existing browser app remained available. These are functional checks, not general model accuracy measurements.
 
@@ -179,6 +198,7 @@ After real evaluation, add the actual number of clips, model comparison, CER, an
 
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 - [English-to-Chinese MarianMT model](https://huggingface.co/Helsinki-NLP/opus-mt-en-zh)
+- [M2M100 multilingual model](https://huggingface.co/facebook/m2m100_418M)
 - [Streamlit data editor](https://docs.streamlit.io/develop/api-reference/data/st.data_editor)
 - [Streamlit file uploader](https://docs.streamlit.io/develop/api-reference/widgets/st.file_uploader)
 - [Streamlit video subtitles](https://docs.streamlit.io/develop/api-reference/media/st.video)

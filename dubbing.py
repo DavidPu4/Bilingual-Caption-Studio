@@ -17,6 +17,24 @@ MAX_SPEED = 2.5
 VOICES = {
     'Mandarin': {'Xiaoxiao': 'zh-CN-XiaoxiaoNeural', 'Yunxi': 'zh-CN-YunxiNeural'},
     'English': {'Jenny': 'en-US-JennyNeural', 'Guy': 'en-US-GuyNeural'},
+    'Spanish': {'Elvira (Spain)': 'es-ES-ElviraNeural', 'Alvaro (Spain)': 'es-ES-AlvaroNeural'},
+    'Hindi': {'Swara': 'hi-IN-SwaraNeural', 'Madhur': 'hi-IN-MadhurNeural'},
+    'Arabic': {'Zariyah (Saudi Arabia)': 'ar-SA-ZariyahNeural', 'Hamed (Saudi Arabia)': 'ar-SA-HamedNeural'},
+    'French': {'Denise (France)': 'fr-FR-DeniseNeural', 'Henri (France)': 'fr-FR-HenriNeural'},
+    'Portuguese': {'Francisca (Brazil)': 'pt-BR-FranciscaNeural', 'Antonio (Brazil)': 'pt-BR-AntonioNeural'},
+    'Russian': {'Svetlana': 'ru-RU-SvetlanaNeural', 'Dmitry': 'ru-RU-DmitryNeural'},
+    'German': {'Katja': 'de-DE-KatjaNeural', 'Conrad': 'de-DE-ConradNeural'},
+    'Japanese': {'Nanami': 'ja-JP-NanamiNeural', 'Keita': 'ja-JP-KeitaNeural'},
+    'Korean': {'SunHi': 'ko-KR-SunHiNeural', 'InJoon': 'ko-KR-InJoonNeural'},
+    'Italian': {'Elsa': 'it-IT-ElsaNeural', 'Diego': 'it-IT-DiegoNeural'},
+    'Bengali': {'Nabanita (Bangladesh)': 'bn-BD-NabanitaNeural', 'Pradeep (Bangladesh)': 'bn-BD-PradeepNeural'},
+    'Indonesian': {'Gadis': 'id-ID-GadisNeural', 'Ardi': 'id-ID-ArdiNeural'},
+    'Urdu': {'Uzma (Pakistan)': 'ur-PK-UzmaNeural', 'Asad (Pakistan)': 'ur-PK-AsadNeural'},
+    'Turkish': {'Emel': 'tr-TR-EmelNeural', 'Ahmet': 'tr-TR-AhmetNeural'},
+    'Vietnamese': {'HoaiMy': 'vi-VN-HoaiMyNeural', 'NamMinh': 'vi-VN-NamMinhNeural'},
+    'Tamil': {'Pallavi (India)': 'ta-IN-PallaviNeural', 'Valluvar (India)': 'ta-IN-ValluvarNeural'},
+    'Thai': {'Premwadee': 'th-TH-PremwadeeNeural', 'Niwat': 'th-TH-NiwatNeural'},
+    'Dutch': {'Colette (Netherlands)': 'nl-NL-ColetteNeural', 'Maarten (Netherlands)': 'nl-NL-MaartenNeural'},
 }
 
 
@@ -170,7 +188,7 @@ def create_dubbed_video(video_bytes, suffix, rows, voice, *, consent=False, prog
     if suffix.lower() not in {'.mp4', '.webm'} or not 0 < len(video_bytes) <= 50 * 1024 * 1024:
         raise DubbingError('Upload an MP4 or WebM video of 50 MB or less.')
     if voice not in {value for group in VOICES.values() for value in group.values()}:
-        raise DubbingError('Choose one of the provided Mandarin or English voices.')
+        raise DubbingError('Choose one of the provided language voices.')
     with tempfile.TemporaryDirectory(prefix='caption-studio-dub-') as folder:
         directory = Path(folder)
         source = directory / ('input' + suffix.lower())

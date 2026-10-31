@@ -143,7 +143,7 @@ def main():
     copy_directory(package_source, runtime / 'Lib' / 'site-packages')
     app = output / 'app'
     app.mkdir()
-    for name in ['app.py', 'captions.py', 'engine.py', 'playback.py', 'dubbing.py', 'dubbing_ui.py',
+    for name in ['app.py', 'captions.py', 'engine.py', 'languages.py', 'playback.py', 'dubbing.py', 'dubbing_ui.py',
                  'sample_project.json', 'README.md', 'requirements.txt']:
         shutil.copy2(ROOT / name, app / name)
     (app / '.streamlit').mkdir()
@@ -154,7 +154,7 @@ def main():
         f'{APP_NAME} - Windows x64 {VERSION}\n\n'
         '1. Extract this entire folder before launching.\n'
         f'2. Double-click {APP_NAME}.exe. Keep runtime/, app/, and _internal/ beside it.\n'
-        '3. Upload a Mandarin/English recording and generate captions.\n'
+        '3. Choose a recording and translation language, upload a clip, and generate captions.\n'
         '4. Save subtitle/project files or optionally create a dubbed video.\n\n'
         'Python is included; no Python installation or account is needed.\n'
         'Microsoft Edge WebView2 Runtime is required (normally present on Windows 10/11).\n'

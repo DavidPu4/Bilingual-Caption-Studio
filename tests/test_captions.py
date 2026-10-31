@@ -121,7 +121,7 @@ class CaptionTests(unittest.TestCase):
 
     def test_unsupported_source_language(self):
         with self.assertRaises(ValueError):
-            generate(object(), object(), source_language='fr')
+            generate(object(), object(), source_language='xx')
 
 
 if __name__ == '__main__':

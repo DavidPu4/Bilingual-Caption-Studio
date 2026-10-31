@@ -1,10 +1,11 @@
 """Attach validated captions only to the recording they belong to."""
 from captions import subtitles
+from languages import LANGUAGES
 
 
 def video_subtitles(tracks, metadata, source_sha256, language='Mandarin'):
-    if language not in {'Mandarin', 'English', 'Off'}:
-        raise ValueError('Choose Mandarin, English, or Off for video captions.')
+    if language not in {*LANGUAGES.values(), 'Off'}:
+        raise ValueError('Choose a supported caption language or Off.')
     if (language == 'Off' or not source_sha256 or metadata.get('sample')
             or metadata.get('source_sha256') != source_sha256):
         return None

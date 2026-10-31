@@ -5,12 +5,14 @@ import streamlit as st
 
 from captions import subtitles
 from dubbing import VOICES, DubbingError, create_dubbed_video, dubbing_signature
+from languages import default_target, language_name
 
 
 def render_dubbing(uploaded, metadata, source_hash, valid_tracks):
     if uploaded is None or Path(uploaded.name).suffix.lower() not in {'.mp4', '.webm'}:
         return
-    target = 'Mandarin' if metadata.get('source_language', 'zh') == 'en' else 'English'
+    source_language = metadata.get('source_language', 'zh')
+    target = language_name(metadata.get('target_language', default_target(source_language)))
     with st.expander(f'Translate the video audio to {target}', expanded=True):
         st.write(f'Create a new video with a standard synthetic {target} voice. The original audio, including music and background sound, will be replaced.')
         if metadata.get('sample') or metadata.get('source_sha256') != source_hash:
@@ -22,8 +24,13 @@ def render_dubbing(uploaded, metadata, source_hash, valid_tracks):
             st.info(f'Add or fix the {target} captions first. The voice will read the current edited text.')
             st.session_state.pop('dubbed_result', None)
             return
-        voice_label = st.selectbox('Dubbing voice', list(VOICES[target]), key=f'dub_voice_{target}')
-        voice = VOICES[target][voice_label]
+        available_voices = VOICES.get(target, {})
+        if not available_voices:
+            st.info(f'Audio dubbing is not available for {target}. You can still edit and export its captions.')
+            st.session_state.pop('dubbed_result', None)
+            return
+        voice_label = st.selectbox('Dubbing voice', list(available_voices), key=f'dub_voice_{target}')
+        voice = available_voices[voice_label]
         st.caption('Voice generation uses Microsoft’s online speech service through edge-tts. Only translated caption text is sent; your video stays on this computer. No account or billing setup is required.')
         consent = st.checkbox('Allow sending the translated captions to Microsoft to generate speech',
                                key='dub_online_consent')

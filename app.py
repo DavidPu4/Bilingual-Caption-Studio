@@ -10,13 +10,14 @@ import pandas as pd
 import streamlit as st
 
 from captions import character_error_rate, load_project, project_json, subtitles, validate
-from engine import TRANSLATION_MODEL, decode_media, generate, load_model, load_translator
+from engine import decode_media, generate, load_model, load_translator, translation_model_for
+from languages import LANGUAGES, default_target, language_code, language_name
 from playback import video_subtitles
 from dubbing_ui import render_dubbing
 
 st.set_page_config(page_title='Bilingual Caption Studio', page_icon='🎧', layout='wide')
 st.title('Bilingual Caption Studio')
-st.write('Mandarin ↔ English recordings. Create translated captions and dubbed videos.')
+st.write(f'Create translated captions and dubbed videos across {len(LANGUAGES)} languages.')
 st.caption('Local captioning · Optional audio dubbing · Subtitle and video export')
 
 
@@ -26,8 +27,8 @@ def cached_model(size):
 
 
 @st.cache_resource
-def cached_translator():
-    return load_translator()
+def cached_translator(source_language, target_language):
+    return load_translator(source_language, target_language)
 
 
 def install_project(tracks, metadata):
@@ -38,14 +39,19 @@ def install_project(tracks, metadata):
 
 with st.sidebar:
     st.header('Project')
-    direction = st.selectbox('Recording language', ['Mandarin → English', 'English → Mandarin'])
-    source_language = 'en' if direction == 'English → Mandarin' else 'zh'
-    source_name = 'English' if source_language == 'en' else 'Mandarin'
+    source_name = st.selectbox('Recording language', list(LANGUAGES.values()),
+                               index=list(LANGUAGES).index('zh'), key='source_language_choice')
+    source_language = language_code(source_name)
+    target_options = [name for code, name in LANGUAGES.items() if code != source_language]
+    if st.session_state.get('target_language_choice') not in target_options:
+        st.session_state.target_language_choice = language_name(default_target(source_language))
+    target_name = st.selectbox('Translate to', target_options, key='target_language_choice')
+    target_language = language_code(target_name)
     size = st.selectbox('Model', ['tiny', 'base', 'small'], index=2,
                         help='Small translated our synthetic smoke-test clip best. Tiny is fastest but made meaning errors. Check quality on your recordings.')
     st.caption('The first run downloads the selected model. Later inference runs locally. CPU speed depends on your computer.')
-    if source_language == 'en':
-        st.caption('English recordings also use a local English-to-Chinese translation model, downloaded on first use.')
+    if target_language != 'en':
+        st.caption('Translation models download on first use. The multilingual model is larger and may take more memory and CPU time. Translation quality varies by language and recording.')
     if st.button('Open sample captions', width='stretch'):
         data = json.loads((Path(__file__).parent / 'sample_project.json').read_text(encoding='utf-8'))
         install_project(data['tracks'], data['metadata'])
@@ -61,20 +67,19 @@ with st.sidebar:
     st.divider()
     st.caption('Sample captions are hand-written interface examples, not model output. Restoring or generating replaces the current editor. Download your project to keep edits.')
 
-uploaded = st.file_uploader(f'Upload an {source_name} recording (up to 50 MB / 5 minutes)' if source_language == 'en' else 'Upload a Mandarin recording (up to 50 MB / 5 minutes)',
+uploaded = st.file_uploader(f'Upload a recording in {source_name} (up to 50 MB / 5 minutes)',
                             key='recording_upload',
                             type=['wav', 'mp3', 'm4a', 'flac', 'ogg', 'mp4', 'webm'])
 source_hash = None
 video_preview = None
-preview_language = 'Mandarin'
+video_controls = None
 if uploaded is not None:
     if uploaded.size > 50 * 1024 * 1024:
         st.error('File exceeds 50 MB. Please upload a smaller recording.')
     else:
         source_hash = hashlib.sha256(uploaded.getvalue()).hexdigest()
         if Path(uploaded.name).suffix.lower() in {'.mp4', '.webm'}:
-            preview_language = st.radio('Captions on video', ['Mandarin', 'English', 'Off'],
-                                         horizontal=True, key='preview_language')
+            video_controls = st.empty()
             video_preview = st.empty()
             video_preview.video(uploaded.getvalue())
         else:
@@ -89,14 +94,16 @@ if st.button('Generate captions', type='primary', disabled=source_hash is None):
                 path.write_bytes(uploaded.getvalue())
                 audio, duration = decode_media(str(path))
                 model = cached_model(size)
-                if source_language == 'en':
-                    st.write('Loading English-to-Mandarin translation model...')
-                translator = cached_translator() if source_language == 'en' else None
+                if target_language != 'en':
+                    st.write(f'Loading {source_name}-to-{target_name} translation model...')
+                translator = cached_translator(source_language, target_language) if target_language != 'en' else None
                 tracks, elapsed = generate(model, audio, progress=st.write,
-                                           source_language=source_language, translator=translator)
+                                           source_language=source_language, target_language=target_language,
+                                           translator=translator)
             install_project(tracks, {'source': uploaded.name, 'source_sha256': source_hash,
                                      'source_language': source_language,
-                                     'translation_model': TRANSLATION_MODEL if source_language == 'en' else 'Whisper speech translation',
+                                     'target_language': target_language,
+                                     'translation_model': translation_model_for(source_language, target_language),
                                      'model': size, 'device': 'cpu', 'compute_type': 'int8',
                                      'duration_seconds': round(duration, 3),
                                      'inference_seconds': elapsed, 'sample': False})
@@ -115,22 +122,25 @@ if metadata.get('sample'):
     st.warning('Sample project: hand-written captions with illustrative timings. This is not an inference result.')
 elif source_hash and metadata.get('source_sha256') != source_hash:
     st.warning('The editor belongs to a different recording. Generate captions to replace it with the selected upload.')
-elif not metadata.get('sample') and metadata.get('source_language', 'zh') != source_language:
-    st.info('The current captions use the previous recording language. Generate again to apply the new selection.')
 project_source = metadata.get('source_language', 'zh')
-project_source_name = 'English' if project_source == 'en' else 'Mandarin'
-if project_source == 'en':
-    st.caption('Mandarin translations inherit the English caption timings. Editing one track does not automatically update the other. Times are seconds.')
+project_target = metadata.get('target_language', default_target(project_source))
+project_source_name = language_name(project_source)
+project_target_name = language_name(project_target)
+if not metadata.get('sample') and (project_source != source_language or project_target != target_language):
+    st.info(f'The editor contains {project_source_name} → {project_target_name} captions. Generate again to apply the selected {source_name} → {target_name} languages.')
+if project_target != 'en':
+    st.caption(f'{project_target_name} translations inherit the {project_source_name} caption timings. Editing one track does not automatically update the other. Times are seconds.')
 else:
-    st.caption('Mandarin and English are generated independently and may have different segment boundaries. Times are seconds. Export each language as its own subtitle track.')
+    st.caption(f'{project_source_name} and {project_target_name} are generated independently and may have different segment boundaries. Times are seconds. Export each language as its own subtitle track.')
 
+track_names = list(st.session_state.tracks)
 cols = st.columns(3)
-cols[0].metric('Mandarin captions', len(st.session_state.tracks['Mandarin']))
-cols[1].metric('English captions', len(st.session_state.tracks['English']))
+for column, name in zip(cols, track_names):
+    column.metric(f'{name} captions', len(st.session_state.tracks[name]))
 cols[2].metric('Inference time', f"{metadata.get('inference_seconds', '—')} s")
 
 valid_tracks = {}
-for name, tab in zip(['Mandarin', 'English'], st.tabs(['Mandarin captions', 'English captions'])):
+for name, tab in zip(track_names, st.tabs([f'{name} captions' for name in track_names])):
     with tab:
         frame = pd.DataFrame(st.session_state.tracks[name], columns=['start', 'end', 'text'])
         edited = st.data_editor(frame, hide_index=True, num_rows='dynamic', width='stretch',
@@ -151,6 +161,16 @@ for name, tab in zip(['Mandarin', 'English'], st.tabs(['Mandarin captions', 'Eng
             st.error(str(exc))
 
 if video_preview is not None:
+    # Follow the saved editor's languages, even after the sidebar selection changes.
+    # The control placeholder keeps it above the video while resolving it after generation.
+    preview_names = (['Mandarin', 'English'] if set(track_names) == {'Mandarin', 'English'}
+                     else [project_target_name, project_source_name])
+    preview_options = [name for name in preview_names if name in track_names] + ['Off']
+    if st.session_state.get('preview_language') not in preview_options:
+        st.session_state.preview_language = preview_options[0]
+    with video_controls.container():
+        preview_language = st.radio('Captions on video', preview_options,
+                                   horizontal=True, key='preview_language')
     preview_tracks = video_subtitles(valid_tracks, metadata, source_hash, preview_language)
     video_preview.video(uploaded.getvalue(), subtitles=preview_tracks)
     if preview_tracks:
@@ -163,7 +183,7 @@ if video_preview is not None:
         else:
             st.info(f'No {preview_language} captions were found in this recording.')
 
-if len(valid_tracks) == 2:
+if len(valid_tracks) == len(track_names):
     st.download_button('Save editable project (.json)', project_json(valid_tracks, metadata).encode('utf-8'),
                        file_name='caption-project.json', mime='application/json')
 
