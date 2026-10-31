@@ -5,6 +5,7 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
+from captions import subtitles
 from dubbing import DubbingError
 
 
@@ -89,3 +90,34 @@ class DubbingErrorUITests(unittest.TestCase):
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(generate.call_args.kwargs['duration_seconds'], 98.059011)
         self.assertEqual(app.session_state['metadata']['caption_duration_seconds'], 98.059011)
+
+    def test_pauses_are_default_and_dubbed_caption_exports_follow_output_timing(self):
+        app = self.saved_russian_video(overrun=False)
+        self.assertEqual(app.radio(key='dub_timing_mode').value, 'Allow video pauses')
+        app.checkbox(key='dub_online_consent').check().run()
+        retimed = [{'start': 97.41, 'end': 100.4, 'text': 'Последняя фраза.'}]
+        result = {'video': b'synthetic-dubbed-video', 'audio': b'synthetic-dubbed-audio',
+                  'segments': 1, 'sped_up_segments': 0, 'duration_seconds': 100.95,
+                  'source_duration_seconds': 98.059011, 'caption_rows': retimed,
+                  'timing_mode': 'pause', 'paused_segments': 1, 'added_seconds': 2.890989,
+                  'voice': 'ru-RU-SvetlanaNeural'}
+        with patch('dubbing_ui.create_dubbed_video', return_value=result) as dub, \
+             patch('dubbing_ui.subtitles', wraps=subtitles) as export:
+            app.button(key='create_dubbed_video').click().run()
+        self.assertEqual(len(app.exception), 0)
+        self.assertEqual(dub.call_args.kwargs['timing_mode'], 'pause')
+        export.assert_any_call(retimed, 'vtt')
+        export.assert_any_call(retimed, 'srt')
+        self.assertTrue(any(button.label == 'Download dubbed captions (SRT)'
+                            for button in app.get('download_button')))
+        self.assertTrue(any('1 video pauses; 2.89 seconds added' in item.value for item in app.caption))
+        self.assertEqual(app.session_state['tracks']['Russian'][0]['end'], 98.059)
+
+        # The original-timing output has different timing and must be generated separately.
+        app.radio(key='dub_timing_mode').set_value('Keep original timing').run()
+        self.assertNotIn('dubbed_result', app.session_state)
+        self.assertEqual(len(app.get('video')), 1)
+        with patch('dubbing_ui.create_dubbed_video', side_effect=DubbingError('Synthetic timing failure.')) as strict:
+            app.button(key='create_dubbed_video').click().run()
+        self.assertEqual(strict.call_args.kwargs['timing_mode'], 'strict')
+        self.assertTrue(any(error.value == 'Synthetic timing failure.' for error in app.error))

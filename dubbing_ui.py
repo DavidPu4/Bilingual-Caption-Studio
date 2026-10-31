@@ -76,10 +76,19 @@ def render_dubbing(uploaded, metadata, source_hash, valid_tracks, install_projec
                 st.info(repair_error)
         voice_label = st.selectbox('Dubbing voice', list(available_voices), key=f'dub_voice_{target}')
         voice = available_voices[voice_label]
+        timing_label = st.radio('Speech timing', ['Allow video pauses', 'Keep original timing'],
+                               key='dub_timing_mode')
+        timing_mode = 'pause' if timing_label == 'Allow video pauses' else 'strict'
+        if timing_mode == 'pause':
+            st.caption('Recommended: the picture pauses when translated speech needs more room. '
+                       'The exported video may be longer, and its captions follow the new timing.')
+        else:
+            st.caption('Keep the original video length. Speech can speed up to 2.5×; longer translations '
+                       'may need shorter text or timing edits.')
         st.caption('Voice generation uses Microsoft’s online speech service through edge-tts. Only translated caption text is sent; your video stays on this computer. No account or billing setup is required.')
         consent = st.checkbox('Allow sending the translated captions to Microsoft to generate speech',
                                key='dub_online_consent')
-        signature = dubbing_signature(source_hash, rows, voice)
+        signature = dubbing_signature(source_hash, rows, voice, timing_mode=timing_mode)
         result = st.session_state.get('dubbed_result')
         if result and result['signature'] != signature:
             st.session_state.pop('dubbed_result', None)
@@ -91,7 +100,8 @@ def render_dubbing(uploaded, metadata, source_hash, valid_tracks, install_projec
             try:
                 with st.status('Creating translated audio...', expanded=True) as status:
                     result = create_dubbed_video(uploaded.getvalue(), Path(uploaded.name).suffix,
-                                                  rows, voice, consent=consent, progress=st.write)
+                                                  rows, voice, timing_mode=timing_mode,
+                                                  consent=consent, progress=st.write)
                     result['signature'] = signature
                     st.session_state.dubbed_result = result
                     status.update(label='Dubbed video ready', state='complete', expanded=False)
@@ -104,10 +114,18 @@ def render_dubbing(uploaded, metadata, source_hash, valid_tracks, install_projec
                 status.update(label='Dubbing failed', state='error', expanded=True)
                 st.error('The dubbed video could not be created. Check the clip and try again. Your captions are preserved.')
         if result:
-            st.video(result['video'], subtitles={target: subtitles(rows, 'vtt')})
-            left, right = st.columns(2)
+            dubbed_rows = result.get('caption_rows', rows)
+            st.video(result['video'], subtitles={target: subtitles(dubbed_rows, 'vtt')})
+            left, middle, right = st.columns(3)
             left.download_button('Download dubbed MP4', result['video'], file_name=f'dubbed-{target.lower()}.mp4',
                                   mime='video/mp4', key='download_dubbed_video')
-            right.download_button('Download translated audio', result['audio'], file_name=f'dubbed-{target.lower()}.wav',
+            middle.download_button('Download translated audio', result['audio'], file_name=f'dubbed-{target.lower()}.wav',
                                    mime='audio/wav', key='download_dubbed_audio')
+            right.download_button('Download dubbed captions (SRT)', subtitles(dubbed_rows, 'srt').encode('utf-8'),
+                                  file_name=f'dubbed-{target.lower()}.srt', mime='application/x-subrip',
+                                  key='download_dubbed_captions')
+            if result.get('timing_mode') == 'pause':
+                st.caption(f"{result.get('paused_segments', 0)} video pauses; "
+                           f"{result.get('added_seconds', 0):.2f} seconds added. "
+                           'Use the dubbed captions download with this video; the editor retains the original recording timing.')
             st.caption(f"{result['segments']} speech segments; {result['sped_up_segments']} adjusted to fit. Timing is approximate. This version does not synchronize lip movements or preserve the original speaker’s voice.")

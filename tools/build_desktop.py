@@ -143,7 +143,7 @@ def main():
     copy_directory(package_source, runtime / 'Lib' / 'site-packages')
     app = output / 'app'
     app.mkdir()
-    for name in ['app.py', 'captions.py', 'engine.py', 'languages.py', 'playback.py', 'dubbing.py', 'dubbing_ui.py',
+    for name in ['app.py', 'captions.py', 'engine.py', 'languages.py', 'playback.py', 'dubbing.py', 'dubbing_ui.py', 'dubbing_video.py',
                  'sample_project.json', 'README.md', 'requirements.txt']:
         shutil.copy2(ROOT / name, app / name)
     (app / '.streamlit').mkdir()

@@ -106,7 +106,7 @@ These are selectable playback captions, including in fullscreen. The original vi
 
 1. Upload an MP4/WebM video, select its recording language, and generate captions.
 2. Review and correct the translated caption track. Dubbing follows the saved project's target language even if the sidebar selection has since changed.
-3. Open **Translate the video audio to [target language]** below the caption editor. Choose a standard voice.
+3. Open **Translate the video audio to [target language]** below the caption editor. Choose a standard voice and speech timing. **Allow video pauses** is the default; **Keep original timing** preserves the original length.
 4. Read the online synthesis disclosure and check the box allowing the translated caption text to be sent to Microsoft. Click **Create [target language] dubbed video**.
 5. Play the result, then download the dubbed MP4 or the translated WAV audio.
 
@@ -114,11 +114,13 @@ No account, API key, or billing setup is needed for this prototype's `edge-tts` 
 
 **Audio behavior:** the output replaces every original audio track with one translated AAC track. Original dialogue, music, and background sound are removed together. This is standard synthetic narration, not voice cloning, source separation, or lip synchronization. Mandarin voices are Xiaoxiao/Yunxi; English voices are Jenny/Guy. Translation mistakes remain audible unless you correct the target captions before dubbing.
 
-Speech starts at each caption's timestamp. Shorter speech leaves silence; longer speech can use the silent gap before the next caption and is sped up with pitch-preserving FFmpeg `atempo` if necessary. It never overlaps the next line. More than 2.5x required speed, captions past the end of the video, or residual overflow fails with an editable caption-row error instead of silently cutting off speech. Current limits are five minutes, 50 MB input, 200 captions, and 30,000 caption characters. Timing is approximate, especially around long translations and pauses.
+In **Allow video pauses**, speech can speed up moderately (up to 1.25x). When a line still needs more room, the picture holds briefly before the next caption, then resumes its original motion. Following audio and captions shift together; the last frame can also hold so the final line finishes. The downloaded dubbed SRT follows this longer video, while the original caption editor keeps its recording timestamps. No speech is cut to fit. Inputs remain limited to five minutes and 50 MB; the paused output can be up to ten minutes and 200 MB.
+
+In **Keep original timing**, speech starts at each caption's timestamp. Shorter speech leaves silence; longer speech can use the silent gap before the next caption and is sped up with pitch-preserving FFmpeg `atempo` if necessary. It never overlaps the next line. More than 2.5x required speed or residual overflow fails with an editable caption-row error. Choose **Allow video pauses** to give the speech more room. Both modes accept up to 200 captions and 30,000 caption characters. Timing is approximate, especially around long translations and pauses.
 
 Generated caption times are bounded to the recording duration before translation; videos use the shorter of the audio and video stream durations. For older saved projects or manual timing edits, the dubbing panel shows which caption exceeds the video and offers **Fit caption times to video**. This preserves current edited text and start times in both tracks while shortening ends to fit. Captions starting outside the video require manual correction. Dubbing errors stay visible below the progress box.
 
-`dubbing.py` handles explicit synthesis consent, three concurrent speech requests with one retry per failed segment, a mono 24 kHz audio timeline, and local MP4 export. H.264 video is stream-copied; other codecs are transcoded to H.264/yuv420p. FFmpeg is supplied by the `imageio-ffmpeg` wheel. `dubbing_ui.py` handles voice selection, disclosure, preview, and downloads. Outputs remain in session memory; temporary work files are removed. Source-video hash, target caption text/timing, and voice fingerprint invalidate stale outputs when edited.
+`dubbing.py` handles explicit synthesis consent, three concurrent speech requests with one retry per failed segment, a mono 24 kHz audio timeline, and local MP4 export. Without pauses, H.264 video is stream-copied; other codecs are transcoded to H.264/yuv420p. `dubbing_video.py` renders inserted pauses in one FFmpeg pass using timestamp shifts, repeated frames, and final-frame padding; paused videos are encoded as H.264/yuv420p at 30 fps. See the [FFmpeg filter documentation](https://ffmpeg.org/ffmpeg-filters.html#setpts_002c-asetpts). FFmpeg is supplied by the `imageio-ffmpeg` wheel. `dubbing_ui.py` handles voice/timing selection, disclosure, preview, and downloads. Outputs remain in session memory; temporary work files are removed. Source-video hash, target caption text/timing, voice, and timing mode invalidate stale outputs when edited.
 
 ## Architecture and decisions
 
@@ -140,6 +142,8 @@ For fast delivery this uses Streamlit and synchronous inference. Authentication,
 ## Evaluation without invented metrics
 
 Caption-timing fix validation on October 31, 2026: **75 automated checks passed**. Regressions cover a final cue extending beyond the video, duration bounds before translation, preserving both edited tracks during repair, rejecting manual cues that start outside the video, and visible dubbing errors. Both Russian voices also returned audio in separate synthetic checks, and a synthetic Russian MP4/WAV export completed; these checks do not guarantee online service availability or that every translation fits its speech slot.
+
+Flexible dubbing validation on October 31, 2026: **88 automated checks passed**. Generated video and local synthetic audio exercise long first/final lines, cumulative pauses, complete audio preservation, shifted subtitle exports, original-editor preservation, and mode changes. Media checks verify held frames and resumed motion, 200 pauses, odd-sized WebM conversion, H.264/AAC output, matching audio/video durations, and removal of the original test tone. The automated suite does not contact the speech service.
 
 Create 5-10 short Mandarin clips with manually checked references, including quiet speech, noise, proper nouns, and code-switching. Keep a held-out subset separate from any tuning. Measure tiny and base on the same clips and record:
 
