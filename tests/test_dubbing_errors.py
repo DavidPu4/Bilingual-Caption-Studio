@@ -121,3 +121,58 @@ class DubbingErrorUITests(unittest.TestCase):
             app.button(key='create_dubbed_video').click().run()
         self.assertEqual(strict.call_args.kwargs['timing_mode'], 'strict')
         self.assertTrue(any(error.value == 'Synthetic timing failure.' for error in app.error))
+
+    def test_successful_segments_survive_failed_attempt_and_retry_without_changing_voice(self):
+        app = self.saved_russian_video(overrun=False)
+        app.selectbox(key='dub_voice_Russian').select('Dmitry').run()
+        app.checkbox(key='dub_online_consent').check().run()
+        caches = []
+
+        def attempt(*args, speech_cache, **kwargs):
+            caches.append(speech_cache)
+            if len(caches) == 1:
+                speech_cache['synthetic-voice-and-text-key'] = b'successful-synthetic-audio'
+                raise DubbingError('Dmitry voice returned no audio for caption 1. Try again.')
+            self.assertEqual(speech_cache['synthetic-voice-and-text-key'], b'successful-synthetic-audio')
+            return {'video': b'synthetic-output', 'audio': b'synthetic-audio', 'segments': 1,
+                    'sped_up_segments': 0, 'duration_seconds': 98.059011,
+                    'voice': 'ru-RU-DmitryNeural'}
+
+        with patch('dubbing_ui.create_dubbed_video', side_effect=attempt) as dub:
+            app.button(key='create_dubbed_video').click().run()
+            self.assertEqual(len(app.exception), 0)
+            self.assertTrue(any('Dmitry voice returned no audio' in error.value for error in app.error))
+            app.button(key='create_dubbed_video').click().run()
+        self.assertEqual(len(app.exception), 0)
+        self.assertIs(caches[0], caches[1])
+        self.assertIs(caches[1], app.session_state['dub_speech_cache'])
+        self.assertTrue(all(call.args[3] == 'ru-RU-DmitryNeural' for call in dub.call_args_list))
+        self.assertEqual(app.selectbox(key='dub_voice_Russian').value, 'Dmitry')
+
+        # Timing, voice, and text changes reuse the same recording's bounded cache;
+        # the backend keys each segment by its text and selected voice.
+        app.radio(key='dub_timing_mode').set_value('Keep original timing').run()
+        app.selectbox(key='dub_voice_Russian').select('Svetlana').run()
+        app.session_state['tracks']['Russian'][0]['text'] = 'Изменённая фраза.'
+        app.session_state['revision'] = 2
+        app.run()
+        self.assertIs(caches[0], app.session_state['dub_speech_cache'])
+
+    def test_recording_change_or_missing_upload_clears_voice_segment_cache(self):
+        app = self.saved_russian_video(overrun=False)
+        app.session_state['dub_speech_cache']['synthetic-key'] = b'synthetic-audio'
+        next(widget for widget in app.file_uploader if widget.key == 'recording_upload').set_value(
+            ('different.mp4', b'different-recording', 'video/mp4')).run()
+        self.assertEqual(len(app.exception), 0)
+        self.assertNotIn('dub_speech_cache', app.session_state)
+        self.assertNotIn('dub_speech_cache_source', app.session_state)
+
+        app.session_state['metadata'] = {
+            **app.session_state['metadata'], 'source_sha256': hashlib.sha256(b'different-recording').hexdigest()}
+        app.run()
+        self.assertEqual(app.session_state['dub_speech_cache'], {})
+        app.session_state['dub_speech_cache']['new-synthetic-key'] = b'synthetic-audio'
+        next(widget for widget in app.file_uploader if widget.key == 'recording_upload').set_value(None).run()
+        self.assertEqual(len(app.exception), 0)
+        self.assertNotIn('dub_speech_cache', app.session_state)
+        self.assertNotIn('dub_speech_cache_source', app.session_state)

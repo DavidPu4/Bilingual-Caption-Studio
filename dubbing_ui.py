@@ -19,9 +19,17 @@ def cached_video_duration(source_hash, suffix, _video_bytes):
         return probe_video(path)[0]
 
 
+def clear_speech_cache():
+    st.session_state.pop('dub_speech_cache', None)
+    st.session_state.pop('dub_speech_cache_source', None)
+
+
 def render_dubbing(uploaded, metadata, source_hash, valid_tracks, install_project=None):
     if uploaded is None or Path(uploaded.name).suffix.lower() not in {'.mp4', '.webm'}:
+        clear_speech_cache()
         return
+    if st.session_state.get('dub_speech_cache_source') != source_hash:
+        clear_speech_cache()
     source_language = metadata.get('source_language', 'zh')
     target = language_name(metadata.get('target_language', default_target(source_language)))
     with st.expander(f'Translate the video audio to {target}', expanded=True):
@@ -29,7 +37,12 @@ def render_dubbing(uploaded, metadata, source_hash, valid_tracks, install_projec
         if metadata.get('sample') or metadata.get('source_sha256') != source_hash:
             st.info('Generate captions for this uploaded video first, then create its translated audio.')
             st.session_state.pop('dubbed_result', None)
+            clear_speech_cache()
             return
+        if 'dub_speech_cache' not in st.session_state:
+            st.session_state.dub_speech_cache = {}
+            st.session_state.dub_speech_cache_source = source_hash
+        speech_cache = st.session_state.dub_speech_cache
         rows = valid_tracks.get(target)
         if not rows:
             st.info(f'Add or fix the {target} captions first. The voice will read the current edited text.')
@@ -86,6 +99,7 @@ def render_dubbing(uploaded, metadata, source_hash, valid_tracks, install_projec
             st.caption('Keep the original video length. Speech can speed up to 2.5×; longer translations '
                        'may need shorter text or timing edits.')
         st.caption('Voice generation uses Microsoft’s online speech service through edge-tts. Only translated caption text is sent; your video stays on this computer. No account or billing setup is required.')
+        st.caption('Retries reuse any voice audio already generated for this recording.')
         consent = st.checkbox('Allow sending the translated captions to Microsoft to generate speech',
                                key='dub_online_consent')
         signature = dubbing_signature(source_hash, rows, voice, timing_mode=timing_mode)
@@ -101,7 +115,8 @@ def render_dubbing(uploaded, metadata, source_hash, valid_tracks, install_projec
                 with st.status('Creating translated audio...', expanded=True) as status:
                     result = create_dubbed_video(uploaded.getvalue(), Path(uploaded.name).suffix,
                                                   rows, voice, timing_mode=timing_mode,
-                                                  consent=consent, progress=st.write)
+                                                  consent=consent, progress=st.write,
+                                                  speech_cache=speech_cache)
                     result['signature'] = signature
                     st.session_state.dubbed_result = result
                     status.update(label='Dubbed video ready', state='complete', expanded=False)

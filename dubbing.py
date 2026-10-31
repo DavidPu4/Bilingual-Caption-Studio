@@ -114,24 +114,9 @@ def probe_video(path):
     return duration, codec
 
 
-async def synthesize_segments(rows, voice, directory):
-    import edge_tts
-    semaphore = asyncio.Semaphore(3)
-
-    async def synthesize(index, row):
-        path = directory / f'speech-{index:04}.mp3'
-        async with semaphore:
-            for attempt in range(2):
-                try:
-                    await edge_tts.Communicate(row['text'], voice).save(str(path))
-                    if not path.exists() or not path.stat().st_size:
-                        raise DubbingError('The voice service returned no audio.')
-                    return path
-                except Exception:
-                    if attempt:
-                        raise DubbingError(f'Voice generation failed for caption {index + 1}. The online voice service may be unavailable; try again later.') from None
-                    await asyncio.sleep(0.5)
-    return await asyncio.gather(*(synthesize(index, row) for index, row in enumerate(rows)))
+async def synthesize_segments(rows, voice, directory, *, cache=None, progress=lambda message: None):
+    from voice_synthesis import synthesize_segments as synthesize
+    return await synthesize(rows, voice, directory, cache=cache, progress=progress)
 
 
 def decode_speech(path):
@@ -240,7 +225,7 @@ def mux_video(source, audio, output, duration, codec):
 
 
 def create_dubbed_video(video_bytes, suffix, rows, voice, *, consent=False, progress=lambda message: None,
-                        timing_mode='strict'):
+                        timing_mode='strict', speech_cache=None):
     if timing_mode not in {'strict', 'pause'}:
         raise DubbingError('Choose Keep original timing or Allow video pauses.')
     if not consent:
@@ -256,7 +241,8 @@ def create_dubbed_video(video_bytes, suffix, rows, voice, *, consent=False, prog
         duration, codec = probe_video(source)
         slots = speech_slots(rows, duration)
         progress(f'Generating {len(slots)} translated speech segments...')
-        files = asyncio.run(synthesize_segments([row for row, _ in slots], voice, directory))
+        synthesis_options = ({'cache': speech_cache, 'progress': progress} if speech_cache is not None else {})
+        files = asyncio.run(synthesize_segments([row for row, _ in slots], voice, directory, **synthesis_options))
         progress('Fitting speech to the video timeline...')
         pauses = []
         caption_rows = [row for row, _ in slots]
