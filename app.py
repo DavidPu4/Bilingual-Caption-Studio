@@ -14,6 +14,7 @@ from engine import decode_media, generate, load_model, load_translator, translat
 from languages import LANGUAGES, default_target, language_code, language_name
 from playback import video_subtitles
 from dubbing_ui import render_dubbing
+from dubbing import probe_video
 
 st.set_page_config(page_title='Bilingual Caption Studio', page_icon='🎧', layout='wide')
 st.title('Bilingual Caption Studio')
@@ -93,19 +94,22 @@ if st.button('Generate captions', type='primary', disabled=source_hash is None):
                 path = Path(directory) / ('input' + Path(uploaded.name).suffix.lower())
                 path.write_bytes(uploaded.getvalue())
                 audio, duration = decode_media(str(path))
+                caption_duration = (min(duration, probe_video(path)[0])
+                                    if path.suffix in {'.mp4', '.webm'} else duration)
                 model = cached_model(size)
                 if target_language != 'en':
                     st.write(f'Loading {source_name}-to-{target_name} translation model...')
                 translator = cached_translator(source_language, target_language) if target_language != 'en' else None
                 tracks, elapsed = generate(model, audio, progress=st.write,
                                            source_language=source_language, target_language=target_language,
-                                           translator=translator)
+                                           translator=translator, duration_seconds=caption_duration)
             install_project(tracks, {'source': uploaded.name, 'source_sha256': source_hash,
                                      'source_language': source_language,
                                      'target_language': target_language,
                                      'translation_model': translation_model_for(source_language, target_language),
                                      'model': size, 'device': 'cpu', 'compute_type': 'int8',
                                      'duration_seconds': round(duration, 3),
+                                     'caption_duration_seconds': caption_duration,
                                      'inference_seconds': elapsed, 'sample': False})
             status.update(label='Caption generation complete', state='complete', expanded=False)
         except Exception as exc:
@@ -187,7 +191,7 @@ if len(valid_tracks) == len(track_names):
     st.download_button('Save editable project (.json)', project_json(valid_tracks, metadata).encode('utf-8'),
                        file_name='caption-project.json', mime='application/json')
 
-render_dubbing(uploaded, metadata, source_hash, valid_tracks)
+render_dubbing(uploaded, metadata, source_hash, valid_tracks, install_project=install_project)
 
 with st.expander(f'Evaluate {project_source_name} transcription'):
     st.write('Paste a manually verified transcript of the same recording. CER measures source transcription, not translation quality. Normalization uses NFKC, lowercasing, and removal of whitespace/punctuation; simplified and traditional characters remain distinct.')

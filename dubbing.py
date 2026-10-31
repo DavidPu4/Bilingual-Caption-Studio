@@ -57,7 +57,10 @@ def speech_slots(rows, duration):
         raise DubbingError('Please use fewer than 201 captions and 30,000 text characters.')
     for index, row in enumerate(rows):
         if row['end'] > duration + 0.001:
-            raise DubbingError(f'Caption {index + 1} ends after the video. Correct its timing first.')
+            raise DubbingError(
+                f"Caption {index + 1} ends at {row['end']:.3f}s, but the video ends at {duration:.3f}s. "
+                'Use Fit caption times to video, or correct its timing in the editor.'
+            )
     # Use a following silent gap if needed, but never overlap the next caption's start.
     return [(row, (rows[index + 1]['start'] if index + 1 < len(rows) else duration) - row['start'])
             for index, row in enumerate(rows)]

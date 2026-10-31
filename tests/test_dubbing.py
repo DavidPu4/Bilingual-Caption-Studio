@@ -35,6 +35,14 @@ class DubbingTests(unittest.TestCase):
                 create_dubbed_video(b'video', '.mp4', [], 'zh-CN-XiaoxiaoNeural')
         synthesize.assert_not_called()
 
+    def test_caption_overrun_explains_actual_times_before_any_voice_request(self):
+        rows = [{'start': 97.41, 'end': 105.41, 'text': 'Synthetic final caption'}]
+        with patch('dubbing.probe_video', return_value=(98.059011, 'h264')), \
+             patch('dubbing.synthesize_segments') as synthesize:
+            with self.assertRaisesRegex(DubbingError, r'Caption 1 ends at 105\.410s.*98\.059s'):
+                create_dubbed_video(b'synthetic-video', '.mp4', rows, 'ru-RU-DmitryNeural', consent=True)
+        synthesize.assert_not_called()
+
 
 @unittest.skipUnless(importlib.util.find_spec('numpy'), 'NumPy is not installed')
 class TimelineTests(unittest.TestCase):

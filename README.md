@@ -105,9 +105,9 @@ These are selectable playback captions, including in fullscreen. The original vi
 ## Translate the video's audio (dubbing)
 
 1. Upload an MP4/WebM video, select its recording language, and generate captions.
-2. Review and correct the translated caption track: Mandarin for English recordings, English for Mandarin recordings. Dubbing uses the saved project's source language even if the sidebar selection has since changed.
-3. Open **Translate the video audio to Mandarin/English** below the caption editor. Choose a standard voice.
-4. Read the online synthesis disclosure and check the box allowing the translated caption text to be sent to Microsoft. Click **Create Mandarin/English dubbed video**.
+2. Review and correct the translated caption track. Dubbing follows the saved project's target language even if the sidebar selection has since changed.
+3. Open **Translate the video audio to [target language]** below the caption editor. Choose a standard voice.
+4. Read the online synthesis disclosure and check the box allowing the translated caption text to be sent to Microsoft. Click **Create [target language] dubbed video**.
 5. Play the result, then download the dubbed MP4 or the translated WAV audio.
 
 No account, API key, or billing setup is needed for this prototype's `edge-tts` voice service. It requires internet and may be unavailable or rate-limited; it is not a service with a production availability guarantee. Only the translated caption text is sent for speech generation after opt-in and an explicit Create action. Original video/audio are not uploaded by the dubbing code. Caption generation and editing can still be used without online voice generation. See the [edge-tts project](https://github.com/rany2/edge-tts).
@@ -115,6 +115,8 @@ No account, API key, or billing setup is needed for this prototype's `edge-tts` 
 **Audio behavior:** the output replaces every original audio track with one translated AAC track. Original dialogue, music, and background sound are removed together. This is standard synthetic narration, not voice cloning, source separation, or lip synchronization. Mandarin voices are Xiaoxiao/Yunxi; English voices are Jenny/Guy. Translation mistakes remain audible unless you correct the target captions before dubbing.
 
 Speech starts at each caption's timestamp. Shorter speech leaves silence; longer speech can use the silent gap before the next caption and is sped up with pitch-preserving FFmpeg `atempo` if necessary. It never overlaps the next line. More than 2.5x required speed, captions past the end of the video, or residual overflow fails with an editable caption-row error instead of silently cutting off speech. Current limits are five minutes, 50 MB input, 200 captions, and 30,000 caption characters. Timing is approximate, especially around long translations and pauses.
+
+Generated caption times are bounded to the recording duration before translation; videos use the shorter of the audio and video stream durations. For older saved projects or manual timing edits, the dubbing panel shows which caption exceeds the video and offers **Fit caption times to video**. This preserves current edited text and start times in both tracks while shortening ends to fit. Captions starting outside the video require manual correction. Dubbing errors stay visible below the progress box.
 
 `dubbing.py` handles explicit synthesis consent, three concurrent speech requests with one retry per failed segment, a mono 24 kHz audio timeline, and local MP4 export. H.264 video is stream-copied; other codecs are transcoded to H.264/yuv420p. FFmpeg is supplied by the `imageio-ffmpeg` wheel. `dubbing_ui.py` handles voice selection, disclosure, preview, and downloads. Outputs remain in session memory; temporary work files are removed. Source-video hash, target caption text/timing, and voice fingerprint invalidate stale outputs when edited.
 
@@ -136,6 +138,8 @@ Editing one language does not regenerate the other. Saved projects include the s
 For fast delivery this uses Streamlit and synchronous inference. Authentication, queues, automatic retries, collaborative editing, and cloud deployment are out of scope. The UI has no progress percentage because the model API does not provide reliable overall progress. A cached model is shared within the process; deploy a worker queue before supporting concurrent inference requests.
 
 ## Evaluation without invented metrics
+
+Caption-timing fix validation on October 31, 2026: **75 automated checks passed**. Regressions cover a final cue extending beyond the video, duration bounds before translation, preserving both edited tracks during repair, rejecting manual cues that start outside the video, and visible dubbing errors. Both Russian voices also returned audio in separate synthetic checks, and a synthetic Russian MP4/WAV export completed; these checks do not guarantee online service availability or that every translation fits its speech slot.
 
 Create 5-10 short Mandarin clips with manually checked references, including quiet speech, noise, proper nouns, and code-switching. Keep a held-out subset separate from any tuning. Measure tiny and base on the same clips and record:
 

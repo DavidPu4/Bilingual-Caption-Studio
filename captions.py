@@ -34,6 +34,40 @@ def validate(rows: list[dict]) -> list[dict]:
     return clean
 
 
+def fit_captions_to_duration(rows: list[dict], duration: float, *, drop_outside: bool = False) -> tuple[list[dict], int]:
+    """Fit cue ends to the media, preserving text and starts.
+
+    Manual edits raise when a cue cannot fit. Generated tracks may explicitly
+    discard hallucinated cues that begin outside the usable media timeline.
+    """
+    try:
+        seconds = float(duration)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError('Media duration must be a finite positive number of seconds.') from exc
+    if isinstance(duration, bool) or not math.isfinite(seconds) or seconds <= 0:
+        raise ValueError('Media duration must be a finite positive number of seconds.')
+    clean = validate(rows)
+    # SRT/VTT round to milliseconds. Flooring keeps their final timestamp inside
+    # the video even when audio and video stream lengths differ slightly.
+    limit_ms = math.floor(seconds * 1000)
+    limit = limit_ms / 1000
+    fitted, changed = [], 0
+    for index, row in enumerate(clean, 1):
+        if row['start'] >= limit or limit_ms - row['start'] * 1000 < 1 - 1e-9:
+            if not drop_outside:
+                raise ValueError(
+                    f'Caption {index} starts too close to or after the media end ({limit:.3f}s). '
+                    'Move its start earlier or remove the caption.'
+                )
+            changed += 1
+            continue
+        if row['end'] > limit:
+            row = {**row, 'end': limit}
+            changed += 1
+        fitted.append(row)
+    return fitted, changed
+
+
 def timestamp(seconds: float, separator: str = ',') -> str:
     milliseconds = round(seconds * 1000)
     hours, remainder = divmod(milliseconds, 3_600_000)

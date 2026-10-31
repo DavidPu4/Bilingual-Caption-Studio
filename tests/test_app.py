@@ -8,6 +8,12 @@ from unittest.mock import patch
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
 class AppTests(unittest.TestCase):
+    def setUp(self):
+        # These tests use synthetic placeholder bytes to inspect player widgets.
+        probe = patch('dubbing_ui.cached_video_duration', return_value=10)
+        probe.start()
+        self.addCleanup(probe.stop)
+
     def test_dubbing_opt_in_uses_edited_target_and_invalidates_old_output(self):
         from streamlit.testing.v1 import AppTest
         video_bytes = b'mock-dubbing-input'

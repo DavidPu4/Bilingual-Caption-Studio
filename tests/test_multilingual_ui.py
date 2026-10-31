@@ -19,6 +19,11 @@ class VoiceRegistryTests(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
 class MultilingualUITests(unittest.TestCase):
+    def setUp(self):
+        probe = patch('dubbing_ui.cached_video_duration', return_value=10)
+        probe.start()
+        self.addCleanup(probe.stop)
+
     def app(self):
         from streamlit.testing.v1 import AppTest
         return AppTest.from_file(str(Path(__file__).resolve().parents[1] / 'app.py')).run(timeout=30)
@@ -90,6 +95,7 @@ class MultilingualUITests(unittest.TestCase):
         translator.assert_called_with('fr', 'de')
         self.assertEqual(generate.call_args.kwargs['source_language'], 'fr')
         self.assertEqual(generate.call_args.kwargs['target_language'], 'de')
+        self.assertEqual(generate.call_args.kwargs['duration_seconds'], 1)
         self.assertEqual(app.session_state['metadata']['source_language'], 'fr')
         self.assertEqual(app.session_state['metadata']['target_language'], 'de')
         self.assertEqual(app.session_state['metadata']['translation_model'], 'facebook/m2m100_418M')

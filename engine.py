@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 import time
 
-from captions import validate
+from captions import fit_captions_to_duration, validate
 from languages import default_target, language_name, validate_pair
 
 MAX_SECONDS = 300
@@ -99,9 +99,13 @@ def decode_media(path: str):
     return audio, duration
 
 
-def generate(model, audio, progress=lambda message: None, *, source_language='zh', target_language=None, translator=None):
+def generate(model, audio, progress=lambda message: None, *, source_language='zh', target_language=None,
+             translator=None, duration_seconds=None):
     target_language = default_target(source_language) if target_language is None else target_language
     validate_pair(source_language, target_language)
+    if duration_seconds is not None:
+        # Reject invalid bounds before loading or calling any model.
+        fit_captions_to_duration([], duration_seconds)
     source_name, target_name = language_name(source_language), language_name(target_language)
     tracks = {}
     started = time.perf_counter()
@@ -114,7 +118,12 @@ def generate(model, audio, progress=lambda message: None, *, source_language='zh
                                       vad_filter=True, condition_on_previous_text=False)
         rows = [{'start': float(s.start), 'end': float(s.end), 'text': s.text.strip()}
                 for s in segments if s.text.strip() and s.end > s.start]
-        tracks[name] = validate(rows)
+        if duration_seconds is None:
+            tracks[name] = validate(rows)
+        else:
+            tracks[name], changed = fit_captions_to_duration(rows, duration_seconds, drop_outside=True)
+            if changed:
+                progress(f'Adjusted {changed} {name} caption(s) to fit the media duration.')
     if target_language != 'en':
         progress(f'Translating {source_name} captions into {target_name}...')
         source_rows = tracks[source_name]

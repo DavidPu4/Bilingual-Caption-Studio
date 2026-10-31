@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from captions import character_error_rate, project_json, subtitles
+from dubbing import probe_video
 from engine import decode_media, generate, load_model, translation_model_for
 from languages import LANGUAGES, default_target, language_name, validate_pair
 
@@ -20,12 +21,18 @@ def main():
     target_language = args.target_language or default_target(args.source_language)
     validate_pair(args.source_language, target_language)
     audio, duration = decode_media(str(args.media))
+    caption_duration = duration
+    if args.media.suffix.lower() in {'.mp4', '.webm'}:
+        video_duration, _ = probe_video(args.media)
+        caption_duration = min(duration, video_duration)
     print('Loading model (first run downloads model files)...', flush=True)
     model = load_model(args.model)
     tracks, elapsed = generate(model, audio, progress=lambda message: print(message, flush=True),
-                               source_language=args.source_language, target_language=target_language)
+                               source_language=args.source_language, target_language=target_language,
+                               duration_seconds=caption_duration)
     metrics = {'model': args.model, 'device': 'cpu', 'compute_type': 'int8',
-               'duration_seconds': duration, 'inference_seconds': elapsed,
+               'duration_seconds': duration, 'caption_duration_seconds': caption_duration,
+               'inference_seconds': elapsed,
                'real_time_factor': elapsed / duration,
                'source': args.media.name, 'sample': False}
     metrics['source_language'] = args.source_language
